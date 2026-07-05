@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Test / coverage output
+coverage/
+.vitest/
+
+# Logs and transient files
+*.log
+npm-debug.log*
+*.tsbuildinfo
+.DS_Store
+
+# NOTE: dist/ and nugget/ are intentionally committed.
+# They are the package's published output (package.json "files") and the
+# vendorable nugget build for repos that cannot take a package dependency.
+# Both are regenerated from src/ via `npm run build` and `npm run build:nugget`.

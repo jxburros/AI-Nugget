@@ -69,12 +69,13 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
   try {
     while (step < maxSteps) {
       step += 1;
-      if (opts.signal?.aborted) return yieldDone('canceled');
-      if (deadlineAt && Date.now() > deadlineAt) return yieldDone('deadline');
+      if (opts.signal?.aborted) return yield* yieldDone('canceled');
+      if (deadlineAt && Date.now() > deadlineAt) return yield* yieldDone('deadline');
       yield emit(opts, { type: 'step_start', step });
 
       const calls: ToolCall[] = [];
       let stepText = '';
+      let streamFailure: AIError | undefined;
       const requestMessages = opts.toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
       for await (const event of opts.handler.stream(opts.connection, {
         model: opts.model,
@@ -85,6 +86,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       })) {
         if (event.type === 'delta') stepText += event.text;
         if (event.type === 'tool_call') calls.push(event.call);
+        if (event.type === 'error') streamFailure = event.error;
         if (event.type === 'done') {
           usage = mergeUsage(usage, event.result.usage);
           if (opts.toolMode === 'promptJson' && calls.length === 0) calls.push(...callsFromPromptJson(stepText));
@@ -92,9 +94,13 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
         yield emit(opts, event);
       }
 
+      // A handler-level failure (auth, policy, cancel, exhausted retries) must
+      // stop the loop honestly rather than looking like an empty completion.
+      if (streamFailure) return yield* yieldDone(streamFailure.kind === 'canceled' ? 'canceled' : 'error');
+
       finalText = stepText;
       messages.push({ role: 'assistant', content: stepText, toolCalls: calls.length ? calls : undefined });
-      if (calls.length === 0) return yieldDone('finished');
+      if (calls.length === 0) return yield* yieldDone('finished');
 
       for (const call of calls) {
         const tool = opts.tools.find((candidate) => candidate.name === call.name);
@@ -128,7 +134,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
             step,
             metadata: opts.metadata,
           });
-          messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(result) });
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(result) });
           yield emit(opts, { type: 'tool_result', step, call, result, isError: false });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Tool failed';
@@ -137,10 +143,10 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       }
 
       const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
-      if (opts.budget?.maxTokens && totalTokens > opts.budget.maxTokens) return yieldDone('budget');
+      if (opts.budget?.maxTokens && totalTokens > opts.budget.maxTokens) return yield* yieldDone('budget');
       await sleep(0, opts.signal);
     }
-    return yieldDone('max_steps');
+    return yield* yieldDone('max_steps');
   } catch (error) {
     const result = makeResult(finalText, messages, usage, step, error instanceof AIError && error.kind === 'canceled' ? 'canceled' : 'error');
     resolveResult(result);
@@ -166,12 +172,12 @@ function makeResult(finalText: string, messages: ChatMessage[], usage: Usage, st
 
 function* appendToolError(opts: AgentOptions, messages: ChatMessage[], step: number, call: ToolCall, message: string): Generator<AgentEvent> {
   const result = { error: message };
-  messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(result) });
+  messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(result) });
   yield emit(opts, { type: 'tool_result', step, call, result, isError: true });
 }
 
 function* appendToolDenied(opts: AgentOptions, messages: ChatMessage[], step: number, call: ToolCall, reason: string): Generator<AgentEvent> {
-  messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify({ denied: true, reason }) });
+  messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify({ denied: true, reason }) });
   yield emit(opts, { type: 'tool_denied', step, call, reason });
 }
 

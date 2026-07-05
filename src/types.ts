@@ -10,8 +10,10 @@ export interface ContentPart {
 export interface ChatMessage {
   role: Role;
   content: string | ContentPart[];
-  toolCalls?: ToolCall[];
-  toolCallId?: string;
+  toolCalls?: ToolCall[];        // role: 'assistant'
+  toolCallId?: string;           // role: 'tool' — answers a specific call
+  name?: string;                 // role: 'tool' — the tool's name (Gemini keys
+                                 // function responses by name, not id)
 }
 
 export interface ToolCall {

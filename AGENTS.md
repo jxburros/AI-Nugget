@@ -21,9 +21,11 @@
 Run these before handing off meaningful changes:
 
 ```bash
-npm test
+npm test              # Node contract suite
+npm run test:browser  # same suite in headless Chromium (isomorphism)
 npm run build
 npm run build:nugget
 ```
 
-Record any skipped validation honestly.
+Live smoke tests are env-gated (`AI_HANDLER_LIVE=1 npm run test:live`) and never
+run by default. Record any skipped validation honestly.

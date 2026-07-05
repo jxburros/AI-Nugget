@@ -65,7 +65,17 @@ export class AIHandler {
       return;
     }
 
-    const resolved = await this.resolveConnection(conn);
+    let resolved: ResolvedConnection;
+    try {
+      resolved = await this.resolveConnection(conn);
+    } catch (errorValue) {
+      // Key resolution failures (missing/locked/denied) are a recorded outcome,
+      // not an uncaught throw — the traceability contract covers them too.
+      const error = fromUnknown(errorValue, conn.provider);
+      await this.recordFailure(callId, conn, req, startedAt, 1, error);
+      yield { type: 'error', error };
+      return;
+    }
     const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata };
     if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
       const error = new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
@@ -231,8 +241,23 @@ function redactRecord(record: CallRecord, redact: (text: string) => string): Cal
   return {
     ...record,
     error: record.error ? { ...record.error, message: redact(record.error.message) } : undefined,
-    metadata: record.metadata ? JSON.parse(redact(JSON.stringify(record.metadata))) as Record<string, unknown> : undefined,
+    metadata: redactMetadata(record.metadata, redact),
   };
+}
+
+/**
+ * Redacts metadata by round-tripping through JSON. Metadata is an app-supplied
+ * passthrough and may contain values JSON cannot represent (BigInt, circular
+ * references, functions); redaction must never throw, so a non-serializable
+ * payload is replaced with a sentinel rather than crashing the telemetry path.
+ */
+function redactMetadata(metadata: Record<string, unknown> | undefined, redact: (text: string) => string): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  try {
+    return JSON.parse(redact(JSON.stringify(metadata))) as Record<string, unknown>;
+  } catch {
+    return { redacted: true, note: 'metadata was not JSON-serializable' };
+  }
 }
 
 function trimSlash(value: string): string {

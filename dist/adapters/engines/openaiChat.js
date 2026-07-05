@@ -1,8 +1,8 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
-import { postJsonResponse, sseLines } from '../../transport.js';
+import { postResponse, sseLines } from '../../transport.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { health, listOpenModels } from './base.js';
+import { health, listOpenModels, streamError, streamTimeout } from './base.js';
 export class OpenAIChatAdapter {
     profile;
     provider;
@@ -29,59 +29,84 @@ export class OpenAIChatAdapter {
         let toolCalls = [];
         let inputTokens;
         let outputTokens;
+        let finish;
+        let sawTerminal = false;
+        const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
-        const res = await postJsonResponse(urlFor(conn, this.profile, req.model), openAiBody(req), conn.headers, conn.timeoutMs ?? 120_000, req.signal, conn.provider);
-        const contentType = res.headers.get('content-type') ?? '';
-        if (!contentType.includes('text/event-stream')) {
-            const raw = await res.json().catch(async () => ({ text: await res.text().catch(() => '') }));
-            const parsed = parseOpenAiResponse(raw);
-            text = parsed.text;
-            toolCalls = parsed.toolCalls;
-            inputTokens = parsed.inputTokens;
-            outputTokens = parsed.outputTokens;
-            if (text)
-                yield { type: 'delta', text };
-        }
-        else {
-            const partialTools = new Map();
-            for await (const line of sseLines(res)) {
-                const chunk = JSON.parse(line);
-                const record = asRecord(chunk);
-                const usage = asRecord(record?.usage);
-                inputTokens = asNumber(usage?.prompt_tokens) ?? inputTokens;
-                outputTokens = asNumber(usage?.completion_tokens) ?? outputTokens;
-                const choices = Array.isArray(record?.choices) ? record.choices : [];
-                const delta = asRecord(asRecord(choices[0])?.delta);
-                const piece = asString(delta?.content);
-                if (piece) {
-                    if (firstTokenMs === null)
-                        firstTokenMs = Date.now() - started;
-                    text += piece;
-                    yield { type: 'delta', text: piece };
-                }
-                const calls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : [];
-                for (const callValue of calls) {
-                    const call = asRecord(callValue);
-                    const index = asNumber(call?.index) ?? 0;
-                    const current = partialTools.get(index) ?? { raw: '' };
-                    current.id = asString(call?.id) ?? current.id;
-                    const fn = asRecord(call?.function);
-                    current.name = asString(fn?.name) ?? current.name;
-                    current.raw += asString(fn?.arguments) ?? '';
-                    partialTools.set(index, current);
-                }
+        try {
+            const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req), conn.headers, timeout.signal, conn.provider);
+            const contentType = res.headers.get('content-type') ?? '';
+            if (!contentType.includes('text/event-stream')) {
+                // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
+                const raw = await res.json().catch(async () => ({ text: await res.text().catch(() => '') }));
+                const parsed = parseOpenAiResponse(raw);
+                text = parsed.text;
+                toolCalls = parsed.toolCalls;
+                inputTokens = parsed.inputTokens;
+                outputTokens = parsed.outputTokens;
+                finish = parsed.finish;
+                sawTerminal = true;
+                if (text)
+                    yield { type: 'delta', text };
+                for (const call of toolCalls)
+                    yield { type: 'tool_call', call };
             }
-            toolCalls = [...partialTools.values()].filter((call) => call.id && call.name).map((call) => ({
-                id: call.id,
-                name: call.name,
-                raw: call.raw,
-                arguments: parseArgs(call.raw),
-            }));
-            for (const call of toolCalls)
-                yield { type: 'tool_call', call };
+            else {
+                const partialTools = new Map();
+                for await (const line of sseLines(res)) {
+                    const chunk = safeParse(line);
+                    const record = asRecord(chunk);
+                    if (!record)
+                        continue;
+                    const usage = asRecord(record.usage);
+                    inputTokens = asNumber(usage?.prompt_tokens) ?? inputTokens;
+                    outputTokens = asNumber(usage?.completion_tokens) ?? outputTokens;
+                    const choices = Array.isArray(record.choices) ? record.choices : [];
+                    const choice = asRecord(choices[0]);
+                    finish = asString(choice?.finish_reason) ?? finish;
+                    if (choice?.finish_reason)
+                        sawTerminal = true;
+                    const delta = asRecord(choice?.delta);
+                    const piece = asString(delta?.content);
+                    if (piece) {
+                        if (firstTokenMs === null)
+                            firstTokenMs = Date.now() - started;
+                        text += piece;
+                        yield { type: 'delta', text: piece };
+                    }
+                    const calls = Array.isArray(delta?.tool_calls) ? delta.tool_calls : [];
+                    for (const callValue of calls) {
+                        const call = asRecord(callValue);
+                        const index = asNumber(call?.index) ?? 0;
+                        const current = partialTools.get(index) ?? { raw: '' };
+                        current.id = asString(call?.id) ?? current.id;
+                        const fn = asRecord(call?.function);
+                        current.name = asString(fn?.name) ?? current.name;
+                        current.raw += asString(fn?.arguments) ?? '';
+                        partialTools.set(index, current);
+                    }
+                }
+                toolCalls = [...partialTools.values()].filter((call) => call.id && call.name).map((call) => ({
+                    id: call.id,
+                    name: call.name,
+                    raw: call.raw,
+                    arguments: parseArgs(call.raw),
+                }));
+                for (const call of toolCalls)
+                    yield { type: 'tool_call', call };
+            }
+            if (!sawTerminal) {
+                yield { type: 'context', kind: 'stream_anomaly', data: { reason: 'stream ended without a finish_reason' } };
+            }
+            const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
+            yield { type: 'done', result };
         }
-        const result = makeResult(conn, req, text, toolCalls, started, firstTokenMs, inputTokens, outputTokens);
-        yield { type: 'done', result };
+        catch (error) {
+            throw streamError(error, timeout, conn.provider);
+        }
+        finally {
+            timeout.done();
+        }
     }
     listModels(conn) {
         return listOpenModels(conn, this.profile);
@@ -91,7 +116,7 @@ export class OpenAIChatAdapter {
     }
 }
 function openAiBody(req) {
-    return {
+    const body = {
         model: req.model,
         messages: req.messages.map(toOpenAiMessage),
         temperature: req.temperature,
@@ -104,6 +129,7 @@ function openAiBody(req) {
         stream: true,
         stream_options: { include_usage: true },
     };
+    return body;
 }
 function toOpenAiMessage(message) {
     return {
@@ -113,6 +139,7 @@ function toOpenAiMessage(message) {
             : message.content.map((part) => part.type === 'image'
                 ? { type: 'image_url', image_url: { url: `data:${part.mimeType ?? 'image/png'};base64,${part.imageBase64 ?? ''}` } }
                 : { type: 'text', text: part.text ?? '' }),
+        name: message.role === 'tool' ? message.name : undefined,
         tool_call_id: message.toolCallId,
         tool_calls: message.toolCalls?.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })),
     };
@@ -132,29 +159,39 @@ function parseOpenAiResponse(raw) {
     const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
     return {
         text,
+        finish: asString(choice?.finish_reason),
         toolCalls: calls.map((value) => {
             const call = asRecord(value);
             const fn = asRecord(call?.function);
             const rawArgs = asString(fn?.arguments) ?? '{}';
-            return { id: asString(call?.id) ?? crypto.randomUUID(), name: asString(fn?.name) ?? 'unknown', raw: rawArgs, arguments: parseArgs(rawArgs) };
+            return { id: asString(call?.id) ?? randomId(), name: asString(fn?.name) ?? 'unknown', raw: rawArgs, arguments: parseArgs(rawArgs) };
         }),
         inputTokens: asNumber(usage?.prompt_tokens),
         outputTokens: asNumber(usage?.completion_tokens),
     };
 }
-function makeResult(conn, req, text, toolCalls, started, firstTokenMs, inputTokens, outputTokens) {
+function makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens) {
     const usage = inputTokens !== undefined || outputTokens !== undefined
         ? { inputTokens, outputTokens, estimated: false }
         : estimatedUsage(textFromMessages(req.messages), text);
     return {
         text,
         toolCalls: toolCalls.length ? toolCalls : undefined,
-        finishReason: toolCalls.length ? 'tool' : 'stop',
+        finishReason: mapFinish(finish, toolCalls.length > 0),
         usage,
         timing: { firstTokenMs, totalMs: Date.now() - started },
         model: req.model,
         source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
     };
+}
+function mapFinish(finish, hasToolCalls) {
+    if (hasToolCalls || finish === 'tool_calls' || finish === 'function_call')
+        return 'tool';
+    if (finish === 'length')
+        return 'length';
+    if (finish === 'content_filter')
+        return 'content_filter';
+    return 'stop';
 }
 function parseArgs(raw) {
     try {
@@ -163,5 +200,16 @@ function parseArgs(raw) {
     catch {
         return {};
     }
+}
+function safeParse(line) {
+    try {
+        return JSON.parse(line);
+    }
+    catch {
+        return undefined;
+    }
+}
+function randomId() {
+    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 //# sourceMappingURL=openaiChat.js.map
