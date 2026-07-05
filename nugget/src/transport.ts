@@ -48,6 +48,41 @@ export async function fetchJson(url: string, init: RequestInit & { timeoutMs: nu
   }
 }
 
+/**
+ * POST a JSON body and return the raw {@link Response} for streaming.
+ *
+ * The caller owns the abort/timeout `signal` and is responsible for keeping it
+ * alive until the response body has been fully consumed — passing a
+ * `withTimeout()` signal here and cleaning it up only after the stream ends is
+ * what lets external cancellation and the timeout apply for the *whole* stream,
+ * not merely the connection handshake. Non-2xx responses are classified and
+ * thrown before the body is handed back.
+ */
+export async function postResponse(
+  url: string,
+  body: unknown,
+  headers: Record<string, string>,
+  signal: AbortSignal,
+  provider: string,
+): Promise<Response> {
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (error) {
+    throw fromUnknown(error, provider);
+  }
+  if (!res.ok) {
+    const raw = await res.text().catch(() => '');
+    throw classify(res.status, raw, provider, res.headers);
+  }
+  return res;
+}
+
 export async function* sseLines(res: Response): AsyncIterable<string> {
   for await (const line of textLines(res)) {
     const trimmed = line.trim();
@@ -93,28 +128,6 @@ export async function* textLines(res: Response): AsyncIterable<string> {
   }
   buffer += decoder.decode();
   if (buffer.trim()) yield buffer;
-}
-
-export async function postJsonResponse(url: string, body: unknown, headers: Record<string, string>, timeoutMs: number, signal: AbortSignal | undefined, provider: string): Promise<Response> {
-  const timeout = withTimeout(timeoutMs, signal);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-      signal: timeout.signal,
-    });
-    if (!res.ok) {
-      const raw = await res.text().catch(() => '');
-      throw classify(res.status, raw, provider, res.headers);
-    }
-    return res;
-  } catch (error) {
-    if (timeout.timedOut()) throw new AIError(`Request timed out after ${timeoutMs}ms`, { kind: 'timeout', provider });
-    throw fromUnknown(error, provider);
-  } finally {
-    timeout.done();
-  }
 }
 
 function tolerantJson(raw: string): unknown {

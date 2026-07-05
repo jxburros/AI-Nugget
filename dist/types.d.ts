@@ -10,6 +10,7 @@ export interface ChatMessage {
     content: string | ContentPart[];
     toolCalls?: ToolCall[];
     toolCallId?: string;
+    name?: string;
 }
 export interface ToolCall {
     id: string;

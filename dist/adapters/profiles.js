@@ -57,6 +57,7 @@ export const PROVIDER_PROFILES = {
         engine: 'anthropic',
         defaultBaseUrl: 'https://api.anthropic.com',
         auth: 'x-api-key',
+        defaultHeaders: { 'anthropic-version': '2023-06-01' },
         quirks: { maxTokensRequired: true },
     },
     google: {
