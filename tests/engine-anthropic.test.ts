@@ -101,6 +101,25 @@ describe('anthropic engine contract', () => {
     expect(toolTurn.content[0]).toEqual({ type: 'tool_result', tool_use_id: 'toolu_1', content: '{"temp":70}' });
   });
 
+  it('groups parallel tool-result messages into one user turn', async () => {
+    const { calls } = mockFetch(sseResponse([{ type: 'message_stop' }]));
+    await collect(anthropic().stream(conn(), chatReq({
+      messages: [
+        { role: 'user', content: 'weather and time?' },
+        { role: 'assistant', content: '', toolCalls: [
+          { id: 'toolu_1', name: 'get_weather', arguments: { city: 'NYC' } },
+          { id: 'toolu_2', name: 'get_time', arguments: { city: 'NYC' } },
+        ] },
+        { role: 'tool', toolCallId: 'toolu_1', name: 'get_weather', content: '{"temp":70}' },
+        { role: 'tool', toolCallId: 'toolu_2', name: 'get_time', content: '{"time":"noon"}' },
+      ],
+    })));
+    const body = calls[0]!.body as Record<string, any>;
+    const toolTurns = body.messages.filter((m: any) => Array.isArray(m.content) && m.content.some((p: any) => p.type === 'tool_result'));
+    expect(toolTurns).toHaveLength(1);
+    expect(toolTurns[0].content.map((p: any) => p.tool_use_id)).toEqual(['toolu_1', 'toolu_2']);
+  });
+
   it('handles a buffered (non-SSE) response body', async () => {
     mockFetch(jsonResponse({ content: [{ type: 'text', text: 'buffered' }], usage: { input_tokens: 2, output_tokens: 1 }, stop_reason: 'end_turn' }));
     const events = await collect(anthropic().stream(conn(), chatReq()));

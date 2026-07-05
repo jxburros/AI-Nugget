@@ -15,13 +15,16 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           registry-url: 'https://npm.pkg.github.com'
           scope: '@jxburros'
       - run: npm ci
+      - name: Verify release tag matches package version
+        run: |
+          node -e "const { readFileSync } = require('node:fs'); const pkg = JSON.parse(readFileSync('package.json', 'utf8')); const expected = 'v' + pkg.version; const actual = process.env.GITHUB_REF_NAME; if (actual !== expected) { console.error(`Release tag ${actual} does not match package version ${expected}`); process.exit(1); }"
       - run: npm test
       - run: npm publish
         env:

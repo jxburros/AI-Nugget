@@ -38,7 +38,8 @@ export class OpenAIChatAdapter implements ProviderAdapter {
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
-        const raw = await res.json().catch(async () => ({ text: await res.text().catch(() => '') })) as unknown;
+        const rawText = await res.text().catch(() => '');
+        const raw = safeParse(rawText) ?? { text: rawText };
         const parsed = parseOpenAiResponse(raw);
         text = parsed.text;
         toolCalls = parsed.toolCalls;
@@ -80,8 +81,8 @@ export class OpenAIChatAdapter implements ProviderAdapter {
             partialTools.set(index, current);
           }
         }
-        toolCalls = [...partialTools.values()].filter((call) => call.id && call.name).map((call) => ({
-          id: call.id!,
+        toolCalls = [...partialTools.values()].filter((call) => call.name).map((call) => ({
+          id: call.id ?? randomId(),
           name: call.name!,
           raw: call.raw,
           arguments: parseArgs(call.raw),
@@ -114,10 +115,9 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, 
     model: req.model,
     messages: req.messages.map(toOpenAiMessage),
     temperature: req.temperature,
-    max_tokens: req.maxTokens,
     top_p: req.topP,
     stop: req.stopSequences,
-    response_format: req.responseFormat?.type === 'json' ? { type: 'json_object' } : undefined,
+    response_format: responseFormatFor(req, profile),
     tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
     tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
     stream: true,
@@ -126,7 +126,16 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, 
     // the server understands it.
     stream_options: profile.quirks?.supportsUsageInStream ? { include_usage: true } : undefined,
   };
+  if (req.maxTokens !== undefined) body[profile.quirks?.maxTokensParam ?? 'max_tokens'] = req.maxTokens;
   return body;
+}
+
+function responseFormatFor(req: ChatRequest, profile: ProviderProfile): Record<string, unknown> | undefined {
+  if (req.responseFormat?.type !== 'json') return undefined;
+  if (req.responseFormat.schema && profile.quirks?.supportsJsonSchema) {
+    return { type: 'json_schema', json_schema: { name: 'response', schema: req.responseFormat.schema } };
+  }
+  return { type: 'json_object' };
 }
 
 function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {

@@ -29,9 +29,18 @@ export function textFromMessages(messages: ChatMessage[]): string {
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
+    let settled = false;
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const timer = setTimeout(() => {
+      settled = true;
+      cleanup();
+      resolve();
+    }, ms);
     const onAbort = () => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
+      cleanup();
       reject(new DOMException('Sleep aborted', 'AbortError'));
     };
     if (signal) {

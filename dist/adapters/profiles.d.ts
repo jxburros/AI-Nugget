@@ -30,6 +30,8 @@ export interface ProviderProfile {
         urlTemplate?: string;
         supportsUsageInStream?: boolean;
         maxTokensRequired?: boolean;
+        maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
+        supportsJsonSchema?: boolean;
     };
     listModelsPath?: string;
     healthPath?: string;

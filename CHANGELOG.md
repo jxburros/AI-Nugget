@@ -5,6 +5,24 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ## 2026-07-05 - Claude
 
+### Changed
+
+- Fixed deployment-readiness blockers from the AI-Nugget review: handler telemetry now records before `done`, records abandoned streams, removes aborted queue waiters, reserves concurrency slots before min-interval sleeps, stops retrying after visible output, caps `Retry-After`, and redacts yielded handler errors.
+- Updated provider and agent correctness: OpenAI/Azure use `max_completion_tokens` and JSON schema response format where supported; Google avoids JSON MIME with tools, sends `responseSchema` when safe, and maps prompt safety blocks; Anthropic/Google batch parallel tool results; OpenRouter has a default `HTTP-Referer`; promptJson history is plain text; integer tool args and approval-modified args are validated; `deadlineMs` now drives an abort signal.
+- Added MIT licensing, Node `>=20`, package `main`/`types`/`default` fallbacks, metadata, `sideEffects: false`, package-file pruning, pinned GitHub Actions, CI read permissions, release tag/package-version checking, `prepublishOnly` nugget rebuilds, and a structure-aware nugget hash.
+- Routed `listModels()` and `testConnection()` through the governed pipeline with explicit operation IDs so key-bearing probes now hit policy, hooks, redaction, and telemetry.
+- Backfilled regression coverage for the lifecycle, provider, key/policy, probe, and agent cases above. Node suite is now 97 deterministic tests plus 6 env-gated live skips.
+
+### Not completed
+
+- npmjs.org publishing was not enabled; GitHub Packages remains the configured registry.
+
+### Notes
+
+- Validation so far: `npm run typecheck`; `npm test` (97 passed, 6 env-gated skips).
+
+## 2026-07-05 - Claude
+
 Closes the v0.3 "adoption-ready" punch list: `toolMode: 'auto'` now does
 something real, provider profiles carry capability metadata, the
 OpenAI-compatible adapter respects it, and distribution is decided and
