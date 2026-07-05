@@ -1,3 +1,4 @@
+import { providerCapabilities } from '../adapters/profiles.js';
 import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
@@ -58,8 +59,21 @@ export function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & { resu
   return Object.assign(iterable, { result });
 }
 
+/**
+ * Resolves the effective tool transport for a run. `native` and `promptJson` are
+ * honored as given; `auto` (the default when unset) picks native when the
+ * connection's provider advertises native function-calling and otherwise falls
+ * back to the promptJson floor (§7) — the branch that makes `auto` a real choice
+ * rather than an alias for native.
+ */
+export function resolveToolMode(mode: AgentOptions['toolMode'], connection: Connection): 'native' | 'promptJson' {
+  if (mode === 'native' || mode === 'promptJson') return mode;
+  return providerCapabilities(connection.provider, connection.baseUrl).nativeTools ? 'native' : 'promptJson';
+}
+
 async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => void, rejectResult: (error: unknown) => void): AsyncIterable<AgentEvent> {
   const messages = [...opts.messages];
+  const toolMode = resolveToolMode(opts.toolMode, opts.connection);
   const maxSteps = opts.budget?.maxSteps ?? 8;
   const deadlineAt = opts.budget?.deadlineMs ? Date.now() + opts.budget.deadlineMs : null;
   let usage: Usage = { estimated: true };
@@ -76,20 +90,20 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       const calls: ToolCall[] = [];
       let stepText = '';
       let streamFailure: AIError | undefined;
-      const requestMessages = opts.toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
+      const requestMessages = toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
       for await (const event of opts.handler.stream(opts.connection, {
         model: opts.model,
         messages: requestMessages,
-        tools: opts.toolMode === 'promptJson' ? undefined : opts.tools,
+        tools: toolMode === 'promptJson' ? undefined : opts.tools,
         signal: opts.signal,
-        metadata: { ...opts.metadata, agentStep: step },
+        metadata: { ...opts.metadata, agentStep: step, toolMode },
       })) {
         if (event.type === 'delta') stepText += event.text;
         if (event.type === 'tool_call') calls.push(event.call);
         if (event.type === 'error') streamFailure = event.error;
         if (event.type === 'done') {
           usage = mergeUsage(usage, event.result.usage);
-          if (opts.toolMode === 'promptJson' && calls.length === 0) calls.push(...callsFromPromptJson(stepText));
+          if (toolMode === 'promptJson' && calls.length === 0) calls.push(...callsFromPromptJson(stepText));
         }
         yield emit(opts, event);
       }

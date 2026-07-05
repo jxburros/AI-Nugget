@@ -34,7 +34,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -109,20 +109,28 @@ export class OpenAIChatAdapter implements ProviderAdapter {
   }
 }
 
-function openAiBody(req: ChatRequest): Record<string, unknown> {
+function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, unknown> {
+  // Provider quirks/capabilities shape the wire request, not just the URL:
+  //  - modelOptional (llama.cpp serves one model): omit `model` when unset, since
+  //    some single-model servers reject an unexpected model field.
+  //  - jsonMode capability: only ask for `response_format` where the provider has
+  //    a structured-JSON mode; unknown endpoints without it would 400 on it.
+  //  - supportsUsageInStream: only add `stream_options.include_usage` where the
+  //    server understands it (many local/compat servers reject unknown fields).
+  const jsonMode = req.responseFormat?.type === 'json' && (profile.capabilities?.jsonMode ?? false);
   const body: Record<string, unknown> = {
-    model: req.model,
     messages: req.messages.map(toOpenAiMessage),
     temperature: req.temperature,
     max_tokens: req.maxTokens,
     top_p: req.topP,
     stop: req.stopSequences,
-    response_format: req.responseFormat?.type === 'json' ? { type: 'json_object' } : undefined,
+    response_format: jsonMode ? { type: 'json_object' } : undefined,
     tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
     tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
     stream: true,
-    stream_options: { include_usage: true },
   };
+  if (req.model || !profile.quirks?.modelOptional) body.model = req.model;
+  if (profile.quirks?.supportsUsageInStream) body.stream_options = { include_usage: true };
   return body;
 }
 

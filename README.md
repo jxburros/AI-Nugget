@@ -57,6 +57,17 @@ with a `baseUrl` resolve to the `openai-compat` escape hatch. **Grok/xAI is not
 blocked and is never officially integrated** — point `openai-compat` at any
 endpoint if you must; that is your configuration, not a supported profile.
 
+Each profile declares **static capabilities** (`nativeTools`, `jsonMode`), read
+via `providerCapabilities(provider, baseUrl)`. These drive real behavior: the
+agent's `toolMode: 'auto'` resolves to native tool-calling on providers that
+advertise `nativeTools` and to the `promptJson` floor otherwise (local/model-
+dependent servers), and the OpenAI engine only sends `response_format` where a
+`jsonMode` exists. Provider **quirks** likewise shape the wire request, not just
+the URL — `supportsUsageInStream` gates `stream_options`, `modelOptional` omits
+the `model` field for single-model llama.cpp servers, and `urlTemplate` builds the
+Azure deployment path. See **`docs/providers.md`** for the local/self-hosted
+providers (Ollama, llama.cpp, openai-compat) documented separately.
+
 Model identity is always `(source, model)` — `modelRef(source, model)` gives the
 canonical `provider/model` key so the same weights served by different hosts stay
 distinct and comparable.
@@ -81,7 +92,9 @@ distinct and comparable.
   validation, `runAgent()` model↔tool loop over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
   `stopReason`s, `ApprovalGate` for side-effecting tools (deny is fed back to the
-  model as data), and `native` / `promptJson` / `auto` tool modes. `promptJson`
+  model as data), and `native` / `promptJson` / `auto` tool modes. `auto` (the
+  default) resolves per connection from provider capabilities — native where the
+  provider supports function-calling, promptJson otherwise. `promptJson`
   mode accepts a single `{"tool","input"}` directive or a batched
   `{"tools":[…]}` (a bare array works too), so the model can request several
   tools in one turn just like native tool-calling.
@@ -121,12 +134,53 @@ Config env vars: `AI_HANDLER_LIVE_PROVIDER`, `AI_HANDLER_LIVE_MODEL`,
 `AI_HANDLER_LIVE_KEY_ENV` (key from an env var), `AI_HANDLER_LIVE_JSON`,
 `AI_HANDLER_LIVE_TOOLS`.
 
+## API stability
+
+The public contract is the exported surface of `@jxburros/ai-handler` and
+`@jxburros/ai-handler/agent` — the types in `src/types.ts`, the `AIHandler`
+pipeline, the seams (`KeySource`, `GovernancePolicy`, `Redactor`, `TelemetrySink`),
+the `adapters/index.ts` factory + profile helpers (`profileFor`,
+`providerCapabilities`), and the agent layer (`runAgent`, `defineTool`,
+`ApprovalGate`). `design.md` is the authoritative description of these shapes.
+
+- **Pre-1.0 (current, `0.x`):** the shapes above are stable enough to build on;
+  additive changes (new providers, new optional fields, new capabilities) land in
+  minor versions. Any breaking change to an existing shape is called out in
+  `CHANGELOG.md` with a migration note and bumps the minor while `0.x`.
+- **Everything else is implementation detail** — engine internals, `raw` bodies,
+  and non-exported helpers may change without notice. Depend only on the exported
+  surface, and pin an exact version (or a vendored `VERSION.txt` hash) so a
+  provider API change is one intentional bump, not a surprise across repos.
+
 ## Distribution
 
-`dist/` is the package output (ESM + `.d.ts`); `nugget/` is the vendorable
-single-folder build (`src/` + `VERSION.txt` with a version + content-hash stamp)
-for repos that copy the code in rather than depend on the package. Both are
-committed and regenerated from `src/`. CI fails if either is stale.
+**Decision: ship both, package-first.** `ai-handler` is distributed as a private
+package **and** a vendorable folder, and both are first-class:
+
+- **Package** — `dist/` is the package output (ESM + `.d.ts`), published as
+  `@jxburros/ai-handler` (private, GitHub Packages). This is the default path for
+  any repo that can take a dependency; it gets versioned upgrades and dedupes one
+  copy across the portfolio.
+- **Vendored** — `nugget/` is the single-folder build (`src/` + `VERSION.txt` with
+  a version + content-hash stamp) for repos that cannot take a dependency. Copy it
+  in; the ai-agent-skills drift check flags a stale vendored copy against its hash.
+
+Both are committed and regenerated from `src/` by `npm run build` /
+`npm run build:nugget`; the identical API means vendoring only changes the import
+path. CI fails if either committed build is stale (`nugget-drift` job). See
+`docs/MIGRATION.md` for choosing a model per repo.
+
+## Docs & examples
+
+- **`docs/providers.md`** — Ollama, llama.cpp, and openai-compat documented
+  separately, plus capabilities/quirks reference and how to add a provider.
+- **`docs/MIGRATION.md`** — adoption steps, seam wiring, and behavioral migration
+  notes.
+- **`examples/`** — runnable integrations: basic chat/stream, an SSE route, an
+  agent with tools + approval, a keyless local Ollama run, and the governance/
+  telemetry seams.
+- **`design.md`** — the full contract; `docs/archive/` holds the evidence base and
+  phased build/adoption plan.
 
 ## Non-goals
 

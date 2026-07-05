@@ -3,6 +3,70 @@
 All notable changes to `ai-handler` are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-05 - Claude (adoption-ready checklist)
+
+Advances the shared nugget toward downstream adoption: makes `toolMode: 'auto'`
+a real choice, gives providers static capabilities that the library consumes,
+lets quirks shape the wire request, and adds the docs/examples an adopting app
+needs. Phase 4 groundwork; no downstream repo is modified here.
+
+### Changed
+- **`toolMode: 'auto'` now resolves native vs promptJson.** Added
+  `resolveToolMode()` in `agent/loop.ts`: `auto` (the default when unset) picks
+  native tool-calling when the connection's provider advertises `nativeTools`,
+  else the promptJson floor (§7). Previously `auto` silently behaved as native.
+  The resolved mode is threaded through the whole step (request messages, `tools`
+  payload, promptJson parsing) and tagged onto call metadata (`metadata.toolMode`).
+- **Provider capabilities exist and are used.** `ProviderProfile` gains a
+  `capabilities` field (`nativeTools`, `jsonMode`); every shipped profile declares
+  it. New public `providerCapabilities(provider, baseUrl)` helper (exported from
+  the root). `nativeTools` drives `toolMode: 'auto'`; `jsonMode` gates whether the
+  OpenAI engine emits `response_format`. Cloud OpenAI-family + `anthropic` +
+  `google` are `nativeTools: true`; `ollama`/`llamacpp`/`lmstudio`/`vllm`/
+  `openai-compat` are `false` (model-dependent local tool support → promptJson).
+- **Quirks affect request generation, not just the URL.** The OpenAI engine now
+  reads its profile in `openAiBody`: `stream_options.include_usage` is sent only
+  where `supportsUsageInStream` is set (added to all cloud openai profiles; kept
+  off for local/compat servers that reject unknown fields); `model` is omitted for
+  `modelOptional` single-model servers (llama.cpp) when unset; `response_format`
+  is gated on `jsonMode`. `urlTemplate` (Azure) continues to build the deployment
+  path.
+- **Docs.** Added `docs/providers.md` (Ollama, llama.cpp, and openai-compat each
+  documented separately, plus a capabilities/quirks reference) and
+  `docs/MIGRATION.md` (adoption steps, seam wiring, distribution-model choice,
+  behavioral migration notes). Rewrote `README.md` sections: capabilities/quirks
+  behavior, an explicit **API stability** policy (pre-1.0 contract surface), an
+  explicit **distribution decision** (ship both, package-first), and a docs/
+  examples index.
+- **Examples.** Added `examples/` with five runnable integrations: `basic-chat`,
+  `streaming-sse-route`, `agent-tools` (tools + approval + budgets), `local-ollama`
+  (keyless, `auto` → promptJson), and `governance-telemetry` (policy/redactor/
+  telemetry seams). Not compiled into `dist/` (tsconfig compiles only `src/`).
+- **Tests (+18, now 90).** New `tests/capabilities.test.ts` (capability values,
+  `resolveToolMode` matrix, quirk-driven request bodies) and `tests/edge-cases.ts`
+  (agent `auto` native vs promptJson end-to-end; side-effect tool with no approval
+  gate → `tool_denied`; locked-key failure recorded as one row + error event and
+  stopping the agent loop with `stopReason: 'error'`; retryable 500 exhaustion).
+
+### Not completed
+- **One real app successfully adopts it first** (final checklist item) is a
+  cross-repo milestone and cannot be performed from this repository. It is
+  intentionally left unchecked; `docs/MIGRATION.md` + `examples/` are the
+  groundwork that de-risks it, and the per-repo end states remain in `design.md` §9.
+- No downstream portfolio repo was modified (Phases 4–8 are per-repo efforts).
+- Version left at `0.2.0` (additive, backward-compatible changes); no git tags
+  pushed.
+
+### Notes
+- Validation: `npm test` → **90 passed, 6 env-gated live skips**;
+  `npm run test:browser` → **90 passed in headless Chromium** (isomorphism holds);
+  `npm run build` clean; `npm run build:nugget` regenerated so committed `dist/`
+  and `nugget/` are not stale (drift check passes). Live smoke tests not run
+  (env-gated).
+- All `src/` changes are backward-compatible: unset `toolMode` still resolves to
+  native for cloud providers (prior default), and existing engine tests pass
+  unchanged.
+
 ## 2026-07-05 - Claude
 
 ### Changed

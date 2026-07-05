@@ -57,4 +57,12 @@ export interface AgentResult {
 export declare function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & {
     result: Promise<AgentResult>;
 };
+/**
+ * Resolves the effective tool transport for a run. `native` and `promptJson` are
+ * honored as given; `auto` (the default when unset) picks native when the
+ * connection's provider advertises native function-calling and otherwise falls
+ * back to the promptJson floor (§7) — the branch that makes `auto` a real choice
+ * rather than an alias for native.
+ */
+export declare function resolveToolMode(mode: AgentOptions['toolMode'], connection: Connection): 'native' | 'promptJson';
 //# sourceMappingURL=loop.d.ts.map

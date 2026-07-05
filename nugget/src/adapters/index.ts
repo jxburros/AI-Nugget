@@ -13,5 +13,5 @@ export function adapterFor(provider: string, baseUrl?: string): ProviderAdapter 
   return new OpenAIChatAdapter(provider, profile);
 }
 
-export { PROVIDER_PROFILES, profileFor } from './profiles.js';
+export { PROVIDER_PROFILES, profileFor, providerCapabilities } from './profiles.js';
 export type { ProviderProfile, EngineName, AuthMode } from './profiles.js';

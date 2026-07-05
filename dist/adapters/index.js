@@ -13,5 +13,5 @@ export function adapterFor(provider, baseUrl) {
         return new OllamaAdapter(provider);
     return new OpenAIChatAdapter(provider, profile);
 }
-export { PROVIDER_PROFILES, profileFor } from './profiles.js';
+export { PROVIDER_PROFILES, profileFor, providerCapabilities } from './profiles.js';
 //# sourceMappingURL=index.js.map
