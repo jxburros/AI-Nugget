@@ -1,0 +1,41 @@
+import type { ToolCall, ToolSchema } from '../types.js';
+
+export interface ToolSpec<A = unknown, R = unknown> extends ToolSchema {
+  sideEffects?: boolean;
+  execute(args: A, ctx: ToolContext): Promise<R> | R;
+}
+
+export interface ToolContext {
+  signal: AbortSignal;
+  callId: string;
+  step: number;
+  metadata?: Record<string, unknown>;
+}
+
+export function defineTool<A, R>(spec: ToolSpec<A, R>): ToolSpec<A, R> {
+  return spec;
+}
+
+export function validateToolArgs(tool: ToolSpec, call: ToolCall): { ok: true; args: unknown } | { ok: false; message: string } {
+  const schema = tool.parameters as { required?: unknown; properties?: unknown; type?: unknown };
+  if (schema.type && schema.type !== 'object') return { ok: false, message: `Tool ${tool.name} parameters must be an object schema` };
+  if (typeof call.arguments !== 'object' || call.arguments === null || Array.isArray(call.arguments)) {
+    return { ok: false, message: `Tool ${tool.name} expected object arguments` };
+  }
+  const args = call.arguments as Record<string, unknown>;
+  const required = Array.isArray(schema.required) ? schema.required.filter((key): key is string => typeof key === 'string') : [];
+  for (const key of required) {
+    if (!(key in args)) return { ok: false, message: `Tool ${tool.name} missing required argument: ${key}` };
+  }
+  const properties = schema.properties && typeof schema.properties === 'object' ? schema.properties as Record<string, { type?: string }> : {};
+  for (const [key, spec] of Object.entries(properties)) {
+    if (!(key in args) || spec.type === undefined) continue;
+    const value = args[key];
+    const ok =
+      (spec.type === 'array' && Array.isArray(value)) ||
+      (spec.type === 'null' && value === null) ||
+      (spec.type !== 'array' && spec.type !== 'null' && typeof value === spec.type);
+    if (!ok) return { ok: false, message: `Tool ${tool.name} argument ${key} must be ${spec.type}` };
+  }
+  return { ok: true, args };
+}
