@@ -108,9 +108,21 @@ function body(req) {
 }
 function toGoogleContent(m) {
     if (m.role === 'tool') {
+        let responseObj = { content: typeof m.content === 'string' ? m.content : '' };
+        if (typeof m.content === 'string') {
+            try {
+                const parsed = JSON.parse(m.content);
+                if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    responseObj = parsed;
+                }
+            }
+            catch {
+                // keep string fallback
+            }
+        }
         return {
             role: 'user',
-            parts: [{ functionResponse: { name: m.name ?? 'unknown', response: { content: typeof m.content === 'string' ? m.content : '' } } }],
+            parts: [{ functionResponse: { name: m.name ?? 'unknown', response: responseObj } }],
         };
     }
     if (m.role === 'assistant' && m.toolCalls?.length) {

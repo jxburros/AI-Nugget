@@ -85,14 +85,17 @@ export class OllamaAdapter implements ProviderAdapter {
     });
     const models = Array.isArray(asRecord(data)?.models) ? asRecord(data)!.models as unknown[] : [];
     const ids = models.map((model) => asString(asRecord(model)?.name) ?? asString(asRecord(model)?.model) ?? '').filter(Boolean);
-    // Probe /api/show per model for context window + capabilities (best effort).
-    return Promise.all(ids.map(async (id) => {
+    // Probe /api/show per model for context window + capabilities (best effort, sequential
+    // to avoid overwhelming a local Ollama instance).
+    const results: ModelInfo[] = [];
+    for (const id of ids) {
       const info: ModelInfo = { id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } };
       const probed = await this.showModel(conn, id).catch(() => undefined);
       if (probed?.contextWindow !== undefined) info.contextWindow = probed.contextWindow;
       if (probed?.capabilities) info.capabilities = probed.capabilities;
-      return info;
-    }));
+      results.push(info);
+    }
+    return results;
   }
 
   private async showModel(conn: ResolvedConnection, model: string): Promise<{ contextWindow?: number; capabilities?: string[] }> {

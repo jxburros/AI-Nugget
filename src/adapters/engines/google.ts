@@ -106,9 +106,20 @@ function body(req: ChatRequest): Record<string, unknown> {
 
 function toGoogleContent(m: ChatMessage): Record<string, unknown> {
   if (m.role === 'tool') {
+    let responseObj: Record<string, unknown> = { content: typeof m.content === 'string' ? m.content : '' };
+    if (typeof m.content === 'string') {
+      try {
+        const parsed: unknown = JSON.parse(m.content);
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          responseObj = parsed as Record<string, unknown>;
+        }
+      } catch {
+        // keep string fallback
+      }
+    }
     return {
       role: 'user',
-      parts: [{ functionResponse: { name: m.name ?? 'unknown', response: { content: typeof m.content === 'string' ? m.content : '' } } }],
+      parts: [{ functionResponse: { name: m.name ?? 'unknown', response: responseObj } }],
     };
   }
   if (m.role === 'assistant' && m.toolCalls?.length) {
