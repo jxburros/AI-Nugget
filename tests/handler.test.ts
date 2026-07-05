@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIHandler, blocklistPolicy, memoryKeySource, type CallRecord, type ChatRequest } from '../src/index.js';
 
+async function collectAsync<T>(iter: AsyncIterable<T>): Promise<T[]> {
+  const result: T[] = [];
+  for await (const item of iter) result.push(item);
+  return result;
+}
+
 describe('AIHandler', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -13,7 +19,7 @@ describe('AIHandler', () => {
       policy: blocklistPolicy([/blocked/]),
       telemetry: { record: (record) => records.push(record) },
     });
-    const events = await Array.fromAsync(handler.stream({ id: 'c1', provider: 'openai' }, req('blocked-model')));
+    const events = await collectAsync(handler.stream({ id: 'c1', provider: 'openai' }, req('blocked-model')));
     expect(events.at(-1)?.type).toBe('error');
     expect(records[0]?.error?.kind).toBe('policy_blocked');
   });
@@ -32,7 +38,7 @@ describe('AIHandler', () => {
       retry: { maxAttempts: 2, baseDelayMs: 1, maxDelayMs: 1 },
       telemetry: { record: (record) => records.push(record) },
     });
-    const events = await Array.fromAsync(handler.stream({ id: 'c1', provider: 'openai', keyRef: { kind: 'env', name: 'OPENAI_API_KEY' } }, {
+    const events = await collectAsync(handler.stream({ id: 'c1', provider: 'openai', keyRef: { kind: 'env', name: 'OPENAI_API_KEY' } }, {
       ...req('gpt-test'),
       metadata: { secret: 'sk-abcdefghijklmnopqrstuvwxyz' },
     }));

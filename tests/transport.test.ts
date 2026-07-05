@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ndjsonLines, sseLines, withTimeout } from '../src/index.js';
 
+async function collectAsync<T>(iter: AsyncIterable<T>): Promise<T[]> {
+  const result: T[] = [];
+  for await (const item of iter) result.push(item);
+  return result;
+}
+
 describe('transport primitives', () => {
   it('merges external aborts and cleans up', () => {
     const external = new AbortController();
@@ -13,11 +19,11 @@ describe('transport primitives', () => {
 
   it('reads SSE data lines', async () => {
     const res = new Response('event: message\ndata: {"a":1}\n\ndata: [DONE]\n');
-    await expect(Array.fromAsync(sseLines(res))).resolves.toEqual(['{"a":1}']);
+    await expect(collectAsync(sseLines(res))).resolves.toEqual(['{"a":1}']);
   });
 
   it('reads buffered NDJSON lines', async () => {
     const res = new Response('{"a":1}\n{"b":2}\n');
-    await expect(Array.fromAsync(ndjsonLines(res))).resolves.toEqual([{ a: 1 }, { b: 2 }]);
+    await expect(collectAsync(ndjsonLines(res))).resolves.toEqual([{ a: 1 }, { b: 2 }]);
   });
 });
