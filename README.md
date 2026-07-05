@@ -12,8 +12,8 @@ only `fetch`, `ReadableStream`, `AbortController`, and `TextDecoder`. It is
 intentionally **not** a router, prompt library, memory system, or secrets vault:
 apps choose models, own prompts, store secrets, and decide what policy to enforce.
 
-See `design.md` for the full contract, `report.md` for the evidence base, and
-`development-plan.md` for the phased build/adoption plan.
+See `design.md` for the full contract. The original evidence base, phased
+build/adoption plan, and dev handoff are archived under `docs/archive/`.
 
 ## Install / use
 
@@ -81,7 +81,10 @@ distinct and comparable.
   validation, `runAgent()` model↔tool loop over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
   `stopReason`s, `ApprovalGate` for side-effecting tools (deny is fed back to the
-  model as data), and `native` / `promptJson` / `auto` tool modes.
+  model as data), and `native` / `promptJson` / `auto` tool modes. `promptJson`
+  mode accepts a single `{"tool","input"}` directive or a batched
+  `{"tools":[…]}` (a bare array works too), so the model can request several
+  tools in one turn just like native tool-calling.
 
 ```ts
 import { runAgent, defineTool } from '@jxburros/ai-handler/agent';

@@ -1,6 +1,6 @@
 # `ai-handler` — Reusable AI Handler Nugget: Design
 
-**Status:** Design (v1). Companion to `report.md` (evidence base) and `development-plan.md` (build/adoption phases).
+**Status:** Design (v1). Companion to `docs/archive/report.md` (evidence base) and `docs/archive/development-plan.md` (build/adoption phases).
 
 **Revision note (v1):** Per maintainer direction: (a) no shipped Grok/xAI blocklist — the governance seam is neutral and empty by default, and Grok is simply never an officially supported provider; (b) provider coverage widened via a protocol-engine + provider-profile architecture (OpenRouter, llama.cpp, LM Studio, Groq, vLLM, DeepSeek, Mistral, Together, Fireworks, Azure OpenAI as named providers); (c) an agent layer (`ai-handler/agent`) is now in scope — native tool-calling in the core plus a composable agent loop with approval gates.
 

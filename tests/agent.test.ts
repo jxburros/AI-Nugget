@@ -154,6 +154,22 @@ describe('agent loop', () => {
     expect(promptResult.result).toEqual({ echoed: 'parity' });
   });
 
+  it('runs several tools from one promptJson turn via the {"tools":[...]} form', async () => {
+    // Model answers with a batched directive: two echo calls in a single turn.
+    mockFetch(
+      textStep(JSON.stringify({ tools: [{ tool: 'echo', input: { msg: 'one' } }, { tool: 'echo', input: { msg: 'two' } }] })),
+      textStep('both done'),
+    );
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'promptJson' });
+    const events = await drain(agent);
+    const result = await agent.result;
+    const echoed = events.filter((e) => e.type === 'tool_result' && !e.isError).map((e) => (e.result as any).echoed);
+    expect(echoed).toEqual(['one', 'two']);
+    // Both calls belong to the same step, matching native multi-tool behavior.
+    expect(events.filter((e) => e.type === 'tool_start').every((e) => (e as any).step === 1)).toBe(true);
+    expect(result.stopReason).toBe('finished');
+  });
+
   it('injects the tool directory into the prompt in promptJson mode', async () => {
     const { calls } = mockFetch(textStep('all done'));
     const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'promptJson' });
