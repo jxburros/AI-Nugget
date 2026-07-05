@@ -180,4 +180,34 @@ describe('agent loop', () => {
     // promptJson mode must NOT send native tools
     expect(body.tools).toBeUndefined();
   });
+
+  it('auto mode sends native tools for a hosted provider with reliable tool-calling', async () => {
+    const { calls } = mockFetch(toolStep('echo', { msg: 'hi' }), textStep('done'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'auto' });
+    await drain(agent);
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.tools).toBeDefined();
+    expect(body.messages.some((m: any) => m.role === 'system')).toBe(false);
+  });
+
+  it('auto mode falls back to promptJson for a local-runtime connection (no toolMode specified either)', async () => {
+    const local: Connection = { id: 'c2', provider: 'llamacpp', keyRef: { kind: 'none' } };
+    const { calls } = mockFetch(textStep(JSON.stringify({ tool: 'echo', input: { msg: 'local' } })), textStep('done'));
+    const agent = runAgent({ handler: handlerWith(), connection: local, model: 'llama3.2', tools: [echo], messages: [{ role: 'user', content: 'go' }] });
+    const events = await drain(agent);
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.tools).toBeUndefined();
+    expect(body.messages.some((m: any) => m.role === 'system' && /echo/.test(m.content))).toBe(true);
+    const toolResult = events.find((e) => e.type === 'tool_result') as any;
+    expect(toolResult.result).toEqual({ echoed: 'local' });
+  });
+
+  it('an explicit toolMode overrides the auto/capability default', async () => {
+    const local: Connection = { id: 'c2', provider: 'llamacpp', keyRef: { kind: 'none' } };
+    const { calls } = mockFetch(toolStep('echo', { msg: 'forced-native' }), textStep('done'));
+    const agent = runAgent({ handler: handlerWith(), connection: local, model: 'llama3.2', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'native' });
+    await drain(agent);
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.tools).toBeDefined();
+  });
 });

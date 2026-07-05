@@ -5,6 +5,67 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ## 2026-07-05 - Claude
 
+Closes the v0.3 "adoption-ready" punch list: `toolMode: 'auto'` now does
+something real, provider profiles carry capability metadata, the
+OpenAI-compatible adapter respects it, and distribution is decided and
+documented. Bumped `version` to `0.3.0`.
+
+### Changed
+
+- **`toolMode: 'auto'` is now real.** Previously anything other than
+  `'promptJson'` (including `'auto'` and the default) sent native tools
+  unconditionally. `runAgent` now resolves `'auto'` per call from
+  `profileFor(connection.provider, connection.baseUrl).capabilities.nativeTools`:
+  hosted providers (openai, anthropic, google, azure-openai, openrouter, groq,
+  deepseek, mistral, together, fireworks) resolve to `native`; local runtimes
+  (ollama, lmstudio, llamacpp, vllm) and the `openai-compat` escape hatch
+  resolve to `promptJson`, since native tool support there is model-dependent,
+  not protocol-guaranteed. An explicit `toolMode: 'native' | 'promptJson'`
+  still always wins.
+- **Provider capability metadata.** Added `ProviderProfile.capabilities`
+  (`nativeTools`, `jsonMode`, `local`, `embeddable`) alongside the existing
+  wire-format `quirks`, so apps (and the agent loop) can answer "does this
+  provider support native tools / a real JSON mode / run locally?" without
+  hardcoding a provider list. `profileFor()` fallback (`openai-compat` and
+  unknown providers) gets the conservative local-runtime defaults.
+- **OpenAI-compatible adapter respects `supportsUsageInStream`.** The engine
+  previously sent `stream_options: { include_usage: true }` on every request
+  regardless of profile. It's now conditional on the quirk (only set for
+  `openai` and `openrouter` today), so llama.cpp/LM Studio/vLLM/other local
+  OpenAI-compatible servers that don't expect the option no longer receive it.
+- **Distribution decided: GitHub Packages is the primary path.** Removed
+  `"private": true`; added `repository`, `publishConfig` (GitHub Packages
+  registry), a `prepublishOnly` build step, and
+  `.github/workflows/publish.yml` (publishes on GitHub release). The
+  vendorable `nugget/` folder remains the documented fallback for repos that
+  can't take a package dependency. README's "Distribution" section spells out
+  both paths and the `.npmrc` an app needs.
+- **Examples.** Added `examples/` with runnable scripts against `dist/`:
+  local Ollama, local llama.cpp, `promptJson` tool-calling, native
+  tool-calling (via `auto`), an `ApprovalGate`, and telemetry — see
+  `examples/README.md`. None run in CI (they hit real local/hosted
+  endpoints), matching the live-smoke-test convention.
+- **Tests.** Added coverage for `auto` resolving to native for a hosted
+  provider and to `promptJson` for a local-runtime provider, for an explicit
+  `toolMode` overriding the resolved default, for capability metadata per
+  profile, and for the `stream_options` quirk gating (79 tests, was 72).
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm test` (79 passed, 6 env-gated skips), `npm run test:browser`
+  (79 passed in headless Chromium), `npm run build`, `npm run build:nugget` —
+  `dist/` and `nugget/` regenerated so the committed builds are not stale.
+  Live smoke tests skipped (env-gated, not run). Manually ran each new example
+  under `examples/` against `dist/`; without local Ollama/llama.cpp or an API
+  key present they fail honestly (a typed/logged error, not a crash or a
+  silent no-op).
+
+## 2026-07-05 - Claude
+
 ### Changed
 - **`promptJson` mode can request several tools per turn.** `callsFromPromptJson`
   now parses the batched `{"tools":[…]}` form and a bare array of directives in

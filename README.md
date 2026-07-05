@@ -61,6 +61,36 @@ Model identity is always `(source, model)` — `modelRef(source, model)` gives t
 canonical `provider/model` key so the same weights served by different hosts stay
 distinct and comparable.
 
+### Provider capabilities
+
+Beyond wire-format `quirks` (auth, URL templates, whether a stream reports
+usage), each profile also carries `capabilities` — the higher-level questions
+apps need answered before they pick behavior:
+
+```ts
+interface ProviderCapabilities {
+  nativeTools: boolean;   // reliable native tool/function-calling for this
+                          // provider's protocol (not just model-dependent)
+  jsonMode: boolean;      // a provider-enforced structured-output mode exists
+  local: boolean;         // runs on localhost / user-controlled infra
+  embeddable: boolean;    // meant to run as a local sidecar, not a hosted service
+}
+```
+
+Hosted cloud providers (`openai`, `azure-openai`, `openrouter`, `groq`,
+`deepseek`, `mistral`, `together`, `fireworks`, `anthropic`, `google`) ship
+`{ nativeTools: true, jsonMode: true, local: false, embeddable: false }`. Local
+runtimes (`lmstudio`, `llamacpp`, `vllm`, and the `openai-compat` escape hatch)
+ship the conservative `{ nativeTools: false, jsonMode: false, local: true,
+embeddable: true }`, since native tool support there is model-dependent, not
+protocol-guaranteed. `ollama` is the one exception with `jsonMode: true` —
+its `format: 'json'` is engine-enforced regardless of which model is loaded.
+These are per-provider defaults, not per-model guarantees: a caller that knows
+its specific loaded model better should configure behavior explicitly (e.g.
+`toolMode: 'native'`) rather than rely on the default.
+
+Access via `profileFor(provider, baseUrl).capabilities`.
+
 ## What's implemented
 
 - **Core:** message-based contracts (`types.ts`), typed `AIError` + `classify()`,
@@ -69,7 +99,11 @@ distinct and comparable.
   an explicit `estimated` flag (`tokens.ts`).
 - **Adapters:** all four engines with streaming, native tool-calling, JSON modes,
   `finishReason` mapping, buffered-`stream:true` fallback, first-token latency,
-  and usage normalization; the full v1 provider profile table.
+  and usage normalization; the full v1 provider profile table. The
+  OpenAI-compatible engine only sends `stream_options: { include_usage: true }`
+  when the profile's `supportsUsageInStream` quirk confirms the server expects
+  it — local servers (llama.cpp, LM Studio, vLLM) that don't have the quirk set
+  never receive the option.
 - **Pipeline (`AIHandler`):** policy → keys → `beforeCall` → concurrency/min-interval
   → jittered retry (honoring `Retry-After`) → redacted `CallRecord` telemetry →
   `afterCall`, with `chat`, `stream`, `listModels`, `testConnection`. Every call —
@@ -81,8 +115,12 @@ distinct and comparable.
   validation, `runAgent()` model↔tool loop over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
   `stopReason`s, `ApprovalGate` for side-effecting tools (deny is fed back to the
-  model as data), and `native` / `promptJson` / `auto` tool modes. `promptJson`
-  mode accepts a single `{"tool","input"}` directive or a batched
+  model as data), and `native` / `promptJson` / `auto` tool modes. `auto` (the
+  default) resolves per call from the connection's provider capability profile
+  (`profileFor(provider).capabilities.nativeTools`) — hosted providers get
+  `native`, local runtimes and the `openai-compat` escape hatch get
+  `promptJson`, and an explicit `toolMode` always overrides the default.
+  `promptJson` mode accepts a single `{"tool","input"}` directive or a batched
   `{"tools":[…]}` (a bare array works too), so the model can request several
   tools in one turn just like native tool-calling.
 
@@ -123,10 +161,34 @@ Config env vars: `AI_HANDLER_LIVE_PROVIDER`, `AI_HANDLER_LIVE_MODEL`,
 
 ## Distribution
 
-`dist/` is the package output (ESM + `.d.ts`); `nugget/` is the vendorable
-single-folder build (`src/` + `VERSION.txt` with a version + content-hash stamp)
-for repos that copy the code in rather than depend on the package. Both are
-committed and regenerated from `src/`. CI fails if either is stale.
+Two supported paths, in order of preference:
+
+1. **GitHub Packages (primary).** `@jxburros/ai-handler` publishes to GitHub
+   Packages on every published GitHub release (`.github/workflows/publish.yml`).
+   Consuming apps add a project `.npmrc`:
+
+   ```
+   @jxburros:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+   ```
+
+   (GitHub Packages requires an authenticated token even for public-repo
+   packages.) Then `npm install @jxburros/ai-handler@^0.3.0` and update via
+   ordinary version-bump PRs — fix once here, bump the dependency in each app.
+2. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
+   build (`src/` + `VERSION.txt` with a version + content-hash stamp) for repos
+   that cannot take a package dependency. Copy it in; `VERSION.txt` makes drift
+   from the source of truth detectable.
+
+`dist/` (ESM + `.d.ts`) is the package's own build output. `dist/` and
+`nugget/` are both committed and regenerated from `src/`; CI fails if either is
+stale.
+
+## Examples
+
+`examples/` has runnable scripts against local Ollama and llama.cpp servers,
+`promptJson` vs. native tool-calling, an `ApprovalGate`, and telemetry — see
+`examples/README.md`.
 
 ## Non-goals
 
