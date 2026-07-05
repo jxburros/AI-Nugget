@@ -7,6 +7,16 @@ export interface AgentOptions {
     model: string;
     tools: ToolSpec[];
     messages: ChatMessage[];
+    /**
+     * `native` sends `tools` on the request; `promptJson` describes tools in a
+     * system message and parses a JSON directive back out of plain text.
+     * `auto` (the default) picks per-call from the connection's provider
+     * capability profile (`profileFor(provider).capabilities.nativeTools`) —
+     * hosted providers with reliable tool-calling get `native`, local runtimes
+     * (Ollama, llama.cpp, LM Studio, vLLM) and the `openai-compat` escape hatch
+     * default to `promptJson` since native tool support there is model-
+     * dependent, not protocol-guaranteed.
+     */
     toolMode?: 'native' | 'promptJson' | 'auto';
     budget?: {
         maxSteps?: number;

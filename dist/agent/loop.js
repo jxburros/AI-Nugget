@@ -1,3 +1,4 @@
+import { profileFor } from '../adapters/profiles.js';
 import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
@@ -15,6 +16,7 @@ export function runAgent(opts) {
 }
 async function* run(opts, resolveResult, rejectResult) {
     const messages = [...opts.messages];
+    const toolMode = resolveToolMode(opts);
     const maxSteps = opts.budget?.maxSteps ?? 8;
     const deadlineAt = opts.budget?.deadlineMs ? Date.now() + opts.budget.deadlineMs : null;
     let usage = { estimated: true };
@@ -31,11 +33,11 @@ async function* run(opts, resolveResult, rejectResult) {
             const calls = [];
             let stepText = '';
             let streamFailure;
-            const requestMessages = opts.toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
+            const requestMessages = toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
             for await (const event of opts.handler.stream(opts.connection, {
                 model: opts.model,
                 messages: requestMessages,
-                tools: opts.toolMode === 'promptJson' ? undefined : opts.tools,
+                tools: toolMode === 'promptJson' ? undefined : opts.tools,
                 signal: opts.signal,
                 metadata: { ...opts.metadata, agentStep: step },
             })) {
@@ -47,7 +49,7 @@ async function* run(opts, resolveResult, rejectResult) {
                     streamFailure = event.error;
                 if (event.type === 'done') {
                     usage = mergeUsage(usage, event.result.usage);
-                    if (opts.toolMode === 'promptJson' && calls.length === 0)
+                    if (toolMode === 'promptJson' && calls.length === 0)
                         calls.push(...callsFromPromptJson(stepText));
                 }
                 yield emit(opts, event);
@@ -135,6 +137,12 @@ function* appendToolError(opts, messages, step, call, message) {
 function* appendToolDenied(opts, messages, step, call, reason) {
     messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify({ denied: true, reason }) });
     yield emit(opts, { type: 'tool_denied', step, call, reason });
+}
+function resolveToolMode(opts) {
+    const mode = opts.toolMode ?? 'auto';
+    if (mode !== 'auto')
+        return mode;
+    return profileFor(opts.connection.provider, opts.connection.baseUrl).capabilities.nativeTools ? 'native' : 'promptJson';
 }
 function withPromptJsonInstruction(messages, tools) {
     return [

@@ -34,7 +34,7 @@ export class OpenAIChatAdapter {
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
-            const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req), conn.headers, timeout.signal, conn.provider);
+            const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
                 // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -115,7 +115,7 @@ export class OpenAIChatAdapter {
         return health(conn, this.profile);
     }
 }
-function openAiBody(req) {
+function openAiBody(req, profile) {
     const body = {
         model: req.model,
         messages: req.messages.map(toOpenAiMessage),
@@ -127,7 +127,10 @@ function openAiBody(req) {
         tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
         tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
         stream: true,
-        stream_options: { include_usage: true },
+        // Many OpenAI-compatible local servers (llama.cpp, LM Studio, vLLM) choke
+        // on or ignore stream_options — only send it where the profile confirms
+        // the server understands it.
+        stream_options: profile.quirks?.supportsUsageInStream ? { include_usage: true } : undefined,
     };
     return body;
 }

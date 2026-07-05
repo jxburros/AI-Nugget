@@ -82,6 +82,13 @@ describe('openaiChat engine contract', () => {
     expect(calls[0]!.headers.authorization).toBe('Bearer sk-test');
   });
 
+  it('omits stream_options.include_usage for providers whose quirk profile does not confirm support', async () => {
+    const { calls } = mockFetch(sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    await collect(adapterFor('llamacpp').stream(resolved('llamacpp', { baseUrl: 'http://localhost:8080/v1' }), chatReq()));
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.stream_options).toBeUndefined();
+  });
+
   it('classifies 401 / 429 / 500 with retryability', async () => {
     for (const [status, kind, retryable] of [[401, 'auth', false], [429, 'rate_limit', true], [500, 'server', true]] as const) {
       mockFetch(textResponse('boom', status));

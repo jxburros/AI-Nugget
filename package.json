@@ -1,9 +1,16 @@
 {
   "name": "@jxburros/ai-handler",
-  "version": "0.2.0",
-  "private": true,
+  "version": "0.3.0",
+  "private": false,
   "type": "module",
   "description": "Small isomorphic AI model handler nugget for provider calls, policy, redaction, telemetry, and agent loops.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jxburros/AI-Nugget.git"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -27,7 +34,8 @@
     "test:browser": "vitest run --config vitest.browser.config.ts",
     "test:live": "vitest run tests/live-smoke.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "build:nugget": "node scripts/build-nugget.mjs"
+    "build:nugget": "node scripts/build-nugget.mjs",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

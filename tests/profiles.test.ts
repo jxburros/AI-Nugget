@@ -54,4 +54,24 @@ describe('provider profiles', () => {
     expect(PROVIDER_PROFILES['azure-openai']!.quirks?.urlTemplate).toContain('/openai/deployments/{model}/chat/completions');
     expect(PROVIDER_PROFILES['azure-openai']!.quirks?.urlTemplate).toContain('api-version=');
   });
+
+  it('marks hosted cloud providers as having reliable native tools and a real JSON mode', () => {
+    for (const key of ['openai', 'anthropic', 'google', 'openrouter', 'groq', 'azure-openai']) {
+      expect(PROVIDER_PROFILES[key]!.capabilities, key).toEqual({ nativeTools: true, jsonMode: true, local: false, embeddable: false });
+    }
+  });
+
+  it('marks local runtimes as local/embeddable with model-dependent tool support', () => {
+    for (const key of ['lmstudio', 'llamacpp', 'vllm']) {
+      const capabilities = PROVIDER_PROFILES[key]!.capabilities;
+      expect(capabilities, key).toEqual({ nativeTools: false, jsonMode: false, local: true, embeddable: true });
+    }
+    // Ollama's format:'json' is engine-enforced regardless of model, unlike its tools field.
+    expect(PROVIDER_PROFILES['ollama']!.capabilities).toEqual({ nativeTools: false, jsonMode: true, local: true, embeddable: true });
+  });
+
+  it('treats the openai-compat escape hatch and unknown providers as conservative local defaults', () => {
+    expect(PROVIDER_PROFILES['openai-compat']!.capabilities).toEqual({ nativeTools: false, jsonMode: false, local: true, embeddable: true });
+    expect(profileFor('some-new-provider', 'https://example.test/v1').capabilities).toEqual({ nativeTools: false, jsonMode: false, local: true, embeddable: true });
+  });
 });
