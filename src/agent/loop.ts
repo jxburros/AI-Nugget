@@ -185,21 +185,37 @@ function withPromptJsonInstruction(messages: ChatMessage[], tools: ToolSpec[]): 
   return [
     {
       role: 'system',
-      content: `When you need a tool, respond only with JSON: {"tool":"name","input":{...}}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
+      content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
     },
     ...messages,
   ];
 }
 
+/**
+ * Parses a promptJson tool directive into zero or more calls. Accepts the single
+ * form ({"tool","input"}), the batched form ({"tools":[...]}), and a bare array
+ * of directives, so a promptJson-mode model can request several tools per turn
+ * just like native tool-calling can. Malformed entries are skipped, not thrown.
+ */
 function callsFromPromptJson(text: string): ToolCall[] {
   const value = extractJson(text);
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-  const record = value as Record<string, unknown>;
-  if (typeof record.tool !== 'string') return [];
-  return [{
-    id: crypto.randomUUID(),
-    name: record.tool,
-    arguments: record.input && typeof record.input === 'object' ? record.input : {},
-    raw: JSON.stringify(record.input ?? {}),
-  }];
+  if (!value || typeof value !== 'object') return [];
+  const entries: unknown[] = Array.isArray(value)
+    ? value
+    : Array.isArray((value as Record<string, unknown>).tools)
+      ? ((value as Record<string, unknown>).tools as unknown[])
+      : [value];
+  const calls: ToolCall[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.tool !== 'string') continue;
+    calls.push({
+      id: crypto.randomUUID(),
+      name: record.tool,
+      arguments: record.input && typeof record.input === 'object' ? record.input : {},
+      raw: JSON.stringify(record.input ?? {}),
+    });
+  }
+  return calls;
 }

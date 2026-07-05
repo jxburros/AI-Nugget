@@ -140,23 +140,40 @@ function withPromptJsonInstruction(messages, tools) {
     return [
         {
             role: 'system',
-            content: `When you need a tool, respond only with JSON: {"tool":"name","input":{...}}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
+            content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
         },
         ...messages,
     ];
 }
+/**
+ * Parses a promptJson tool directive into zero or more calls. Accepts the single
+ * form ({"tool","input"}), the batched form ({"tools":[...]}), and a bare array
+ * of directives, so a promptJson-mode model can request several tools per turn
+ * just like native tool-calling can. Malformed entries are skipped, not thrown.
+ */
 function callsFromPromptJson(text) {
     const value = extractJson(text);
-    if (!value || typeof value !== 'object' || Array.isArray(value))
+    if (!value || typeof value !== 'object')
         return [];
-    const record = value;
-    if (typeof record.tool !== 'string')
-        return [];
-    return [{
+    const entries = Array.isArray(value)
+        ? value
+        : Array.isArray(value.tools)
+            ? value.tools
+            : [value];
+    const calls = [];
+    for (const entry of entries) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry))
+            continue;
+        const record = entry;
+        if (typeof record.tool !== 'string')
+            continue;
+        calls.push({
             id: crypto.randomUUID(),
             name: record.tool,
             arguments: record.input && typeof record.input === 'object' ? record.input : {},
             raw: JSON.stringify(record.input ?? {}),
-        }];
+        });
+    }
+    return calls;
 }
 //# sourceMappingURL=loop.js.map

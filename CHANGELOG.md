@@ -3,6 +3,28 @@
 All notable changes to `ai-handler` are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-05 - Claude
+
+### Changed
+- **`promptJson` mode can request several tools per turn.** `callsFromPromptJson`
+  now parses the batched `{"tools":[…]}` form and a bare array of directives in
+  addition to the single `{"tool","input"}` object, so a promptJson-mode model
+  reaches parity with native multi-tool calling. Malformed entries are skipped,
+  not thrown. The injected system instruction now documents both forms. Added an
+  agent test covering two tools from one promptJson turn (72 tests, was 71).
+- **Archived background docs.** Moved `report.md`, `development-plan.md`, and
+  `ai-handler-handoff.md` under `docs/archive/`; `design.md` remains the living
+  contract. Updated `README.md` and `design.md` cross-references accordingly.
+
+### Not completed
+- None.
+
+### Notes
+- Validation: `npm test` (72 passed, 6 env-gated skips), `npm run test:browser`
+  (72 passed), `npm run build`, and `npm run build:nugget` — `dist/` and
+  `nugget/` regenerated so the committed builds are not stale. Live smoke tests
+  skipped (env-gated, not run).
+
 ## 2026-07-05 - Claude (follow-up: browser CI + live smoke)
 
 Resolves the two items left open in the entry below — headless-browser CI and
