@@ -91,10 +91,32 @@ import { runAgent, defineTool } from '@jxburros/ai-handler/agent';
 
 ```bash
 npm install
-npm test          # Vitest contract suite (71 tests)
-npm run build     # tsc → dist/ (also the typecheck)
+npm test            # Vitest contract suite in Node (71 tests)
+npm run test:browser   # same suite in headless Chromium (proves isomorphism)
+npm run build       # tsc → dist/ (also the typecheck)
 npm run build:nugget   # writes a vendorable nugget/ stamped with version + content hash
 ```
+
+### Live smoke tests (optional, env-gated)
+
+`tests/live-smoke.test.ts` exercises the real wire path against a live provider.
+It is **skipped unless `AI_HANDLER_LIVE=1`**, so it never runs in the default
+suite or in CI:
+
+```bash
+# Local Ollama (defaults: provider=ollama, model=llama3.2)
+AI_HANDLER_LIVE=1 npm run test:live
+
+# A cloud provider, with JSON-mode and agent tool-loop checks enabled
+AI_HANDLER_LIVE=1 AI_HANDLER_LIVE_PROVIDER=openai AI_HANDLER_LIVE_MODEL=gpt-4o-mini \
+  AI_HANDLER_LIVE_KEY_ENV=OPENAI_API_KEY AI_HANDLER_LIVE_JSON=1 AI_HANDLER_LIVE_TOOLS=1 \
+  npm run test:live
+```
+
+Config env vars: `AI_HANDLER_LIVE_PROVIDER`, `AI_HANDLER_LIVE_MODEL`,
+`AI_HANDLER_LIVE_BASE_URL`, `AI_HANDLER_LIVE_KEY` (literal) or
+`AI_HANDLER_LIVE_KEY_ENV` (key from an env var), `AI_HANDLER_LIVE_JSON`,
+`AI_HANDLER_LIVE_TOOLS`.
 
 ## Distribution
 

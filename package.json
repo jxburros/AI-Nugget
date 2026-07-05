@@ -24,11 +24,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:live": "vitest run tests/live-smoke.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:nugget": "node scripts/build-nugget.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",
+    "@vitest/browser": "^4.1.9",
+    "@vitest/browser-playwright": "^4.1.9",
+    "playwright": "^1.61.1",
     "typescript": "^5.8.3",
     "vitest": "^4.1.5"
   }

@@ -3,6 +3,44 @@
 All notable changes to `ai-handler` are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-05 - Claude (follow-up: browser CI + live smoke)
+
+Resolves the two items left open in the entry below — headless-browser CI and
+env-gated live smoke tests (design §10 / development-plan Phase 2).
+
+### Changed
+
+- **Headless-Chromium test run.** Added `vitest.browser.config.ts` (Playwright
+  provider via `@vitest/browser-playwright`) and a `test:browser` script that
+  runs the full contract suite in a real browser, proving the isomorphism claim.
+  The config prefers a pre-provisioned Chromium (`CHROMIUM_PATH` /
+  `/opt/pw-browsers/chromium`) and otherwise falls back to Playwright's own
+  download, so it works both in sandboxes and in GitHub CI. Added a `browser`
+  CI job (`npx playwright install --with-deps chromium` → `npm run test:browser`).
+  Dev-only deps added: `@vitest/browser`, `@vitest/browser-playwright`,
+  `playwright` (no runtime deps changed).
+- **Env-gated live smoke tests.** Added `tests/live-smoke.test.ts` (+ `test:live`
+  script), skipped unless `AI_HANDLER_LIVE=1`, exercising the real wire path
+  against a live provider (local Ollama by default; any profile via
+  `AI_HANDLER_LIVE_PROVIDER`/`_MODEL`/`_BASE_URL`/`_KEY`/`_KEY_ENV`). Covers
+  connection health, model listing, streaming (deltas/usage/timing), buffered
+  `chat()`, and optional JSON-mode (`AI_HANDLER_LIVE_JSON=1`) and agent tool-loop
+  (`AI_HANDLER_LIVE_TOOLS=1`) checks. Excluded from the browser project.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm test` → 71 pass, 6 live tests skipped (gate off).
+  `npm run test:browser` → **71 pass in headless Chromium**. `npm run build`
+  clean. The live gate was confirmed to *activate* under `AI_HANDLER_LIVE=1`
+  (it ran and failed honestly with no local Ollama present), proving it exercises
+  the wire path rather than silently skipping. No live provider runs in CI.
+- `dist/`/`nugget/` are unchanged this round (no `src/` edits); only tests,
+  config, docs, and dev dependencies changed.
+
 ## 2026-07-05 - Claude
 
 Completes the `ai-handler` nugget from the working scaffold described in
@@ -63,13 +101,9 @@ contract suite + agent layer). Bumped `version` to `0.2.0`.
 
 ### Not completed
 
-- **Headless-browser CI.** The core is written to be isomorphic (only `fetch`,
-  `ReadableStream`, `AbortController`, `TextDecoder`; no Node built-ins in
-  `src/`), but a headless-Chromium test job (design §10) is not yet wired.
-  Recorded as a follow-up rather than claimed.
-- **Live env-gated smoke tests** (`AI_HANDLER_LIVE=1`) against local
-  Ollama/llama.cpp and one live call per cloud provider are not included; the
-  deterministic suite runs entirely on mocked `fetch`.
+- **Headless-browser CI** and **live env-gated smoke tests** — both addressed in
+  the follow-up entry above (this entry's original state is preserved for
+  history).
 - **Downstream adoption (Phases 4–8).** No changes were made to the five
   portfolio repos (AI-model-test, AI-Server-Studio, Blobsmith, locus-os,
   ai-agent-skills); those are separate per-repo efforts governed by each repo's
