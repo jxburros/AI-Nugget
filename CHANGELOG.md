@@ -7,6 +7,20 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ### Changed
 
+- Documented `listModels()` as optional-per-adapter in the README: the `anthropic` and `google` engines don't implement it and `AIHandler.listModels()` resolves to `[]` for them (not an error), which isn't visible from the `ProviderCapabilities` table. Added a "Letting an app's users pick a model (best practice)" section covering the pattern found while building a model-picker UI against this library in a consuming app: keep `provider`/`baseUrl` on a server-side allowlist (never client input, since they control where a resolved key is sent), treat `model` as ordinary client input, and use `listModels()` with an app-configured fallback for engines that don't support discovery. Docs-only change, no code/contract changes.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: docs-only change; no code touched, so the existing `npm test`/`npm run build`/`npm run test:browser` results are unaffected. The pattern was validated in the consuming app (a `GET /api/models` route calling `handler.listModels()` per connection, tested against a fake `openai-compat` server that implements `/models` and one that 404s on it to exercise the fallback path).
+
+## 2026-07-06 - Claude
+
+### Changed
+
 - Added Agent Skills under `.claude/skills/` so AI agents can develop successfully with the nugget: `use-ai-handler` (integrating the library into a consuming app), `build-agent-loop` (the `@jxburros/ai-handler/agent` tool-calling layer), `add-provider` (extending the provider profile table), and `develop-nugget` (repo invariants, validation commands, and changelog format).
 - Pointed to the skills from `AGENTS.md` (so all agents discover them) and added an "Agent skills" section to `README.md`.
 

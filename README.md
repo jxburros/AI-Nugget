@@ -100,6 +100,42 @@ matters most for OpenRouter, Ollama, LM Studio, vLLM, and any
 profile table. A caller that knows its model better should pass an explicit
 `toolMode` (agent layer) rather than rely on the capability default.
 
+**`listModels()` is optional per adapter — two engines never return anything.**
+`ProviderAdapter.listModels` is `?`-optional, and `AIHandler.listModels()`
+falls back to `[]` when an adapter doesn't implement it. Concretely: the
+`openaiChat` and `ollama` engines implement it (`GET /models` /
+`GET /api/tags`); the `anthropic` and `google` engines currently don't, so
+`handler.listModels()` for those providers always resolves to `[]`, not an
+error. This is easy to miss because `capabilities` doesn't surface it — an
+app building a model picker on top of `listModels()` should treat an empty
+result as "this provider doesn't support discovery," not "this provider has
+no models," and have a fallback (e.g. an app-configured default model per
+connection) ready for `anthropic`/`google` rather than showing an empty list.
+
+### Letting an app's users pick a model (best practice)
+
+The nugget deliberately has no concept of "the app's currently selected
+model" — that's app policy, same as governance (see Non-goals). The pattern
+that has worked well for apps building a model-picker UI on top of
+`AIHandler`:
+
+1. **Keep `provider`/`baseUrl` on a server-side allowlist; never take them
+   from client input.** A `Connection`'s `provider`/`baseUrl` decide where
+   the server's resolved API key gets sent (via `KeySource` → `applyAuth`);
+   letting a client control either directly is effectively letting it
+   redirect a real credential to an arbitrary endpoint (SSRF plus key
+   exposure). Define your app's available connections server-side (e.g. a
+   small config list, each with its own `KeyRef`), and only let the client
+   choose a `connectionId` out of that list.
+2. **`model` is fine as ordinary client input.** Unlike `provider`/`baseUrl`,
+   a bad or unexpected `model` string just comes back as a normal provider
+   error (unknown model) from `chat()`/`stream()` — there's no equivalent
+   security concern, so there's no need to allowlist it server-side beyond
+   what the provider itself enforces.
+3. **Use `handler.listModels(connection)` to populate the picker live**, and
+   fall back to an app-configured default model for connections whose engine
+   doesn't implement discovery (see above).
+
 ## What's implemented
 
 - **Core:** message-based contracts (`types.ts`), typed `AIError` + `classify()`,
