@@ -7,6 +7,21 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ### Changed
 
+- Added Agent Skills under `.claude/skills/` so AI agents can develop successfully with the nugget: `use-ai-handler` (integrating the library into a consuming app), `build-agent-loop` (the `@jxburros/ai-handler/agent` tool-calling layer), `add-provider` (extending the provider profile table), and `develop-nugget` (repo invariants, validation commands, and changelog format).
+- Pointed to the skills from `AGENTS.md` (so all agents discover them) and added an "Agent skills" section to `README.md`.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: documentation-only change (no `src/`, `tests/`, or build changes). Sanity check: `npm test` (101 passed, 6 env-gated skips) and `npm run build` (clean, `dist/` unchanged). `npm run test:browser` and `npm run build:nugget` skipped — no source changes to exercise.
+
+## 2026-07-06 - Claude
+
+### Changed
+
 - Fixed a traceability gap in `AIHandler.stream()`: a throwing `beforeCall` hook now records a failure and yields a redacted error instead of escaping the async generator uncaught (matching the existing `runProbe()` behavior for `listModels`/`testConnection`).
 - `redactedError()` now redacts `error.cause.message` in addition to `message`/`raw`, closing the one path where a secret could reach a caller unredacted.
 - Removed the dead `rejectResult` plumbing in the agent loop (`runAgent().result` only ever resolved; the reject path was unreachable on every code path) and split tool-result serialization out of the tool-execution try/catch so a non-serializable return value (e.g. a circular reference) is reported distinctly rather than mislabeled as a tool execution failure.

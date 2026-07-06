@@ -230,6 +230,16 @@ rebuilds both, and CI fails if either is stale.
 `promptJson` vs. native tool-calling, an `ApprovalGate`, and telemetry — see
 `examples/README.md`.
 
+## Agent skills
+
+`.claude/skills/` contains Agent Skills — task-specific guides that Claude Code
+picks up automatically and that any AI agent (or human) can read as plain
+Markdown: `use-ai-handler` (integrating the nugget into an app),
+`build-agent-loop` (the agent/tool-calling layer), `add-provider` (extending
+the provider profile table), and `develop-nugget` (invariants and validation
+for changes to this repo). `AGENTS.md` remains the always-on baseline; the
+skills carry the per-task detail.
+
 ## Non-goals
 
 Not a full agent framework (no planning/memory/RAG/multi-agent — the loop
