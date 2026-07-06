@@ -1,18 +1,18 @@
 ---
 name: build-agent-loop
-description: Build a model↔tool agent loop with the ai-handler agent layer — defineTool, runAgent, toolMode selection (native vs promptJson vs auto), budgets, ApprovalGate, and AgentEvent streaming. Use when adding tool-calling / function-calling or an agent loop to an app that uses this nugget, or when debugging why tools aren't being called.
+description: Build a model↔tool agent loop with the AI Nugget agent layer — defineTool, runAgent, toolMode selection (native vs promptJson vs auto), budgets, ApprovalGate, and AgentEvent streaming. Use when adding tool-calling / function-calling or an agent loop to an app that uses this nugget, or when debugging why tools aren't being called.
 ---
 
-# Building an agent loop with ai-handler
+# Building an agent loop with AI Nugget
 
-The agent layer lives at `@jxburros/ai-handler/agent` (source:
+The agent layer lives at `@jxburros/ai-nugget/agent` (source:
 `src/agent/`). It is a single model↔tool loop over the full handler pipeline —
 no planning, memory, RAG, or multi-agent (those are explicit non-goals).
 
 ## Define tools
 
 ```ts
-import { runAgent, defineTool } from '@jxburros/ai-handler/agent';
+import { runAgent, defineTool } from '@jxburros/ai-nugget/agent';
 
 const getWeather = defineTool({
   name: 'get_weather',

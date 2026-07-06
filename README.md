@@ -1,6 +1,6 @@
-# ai-handler
+# AI Nugget
 
-`ai-handler` is a small, zero-dependency, isomorphic TypeScript nugget for
+`AI Nugget` is a small, zero-dependency, isomorphic TypeScript nugget for
 talking to AI model providers through one pipeline:
 
 ```
@@ -19,7 +19,7 @@ build/adoption plan, and dev handoff are archived under `docs/archive/`.
 ## Install / use
 
 ```ts
-import { AIHandler, envKeySource } from '@jxburros/ai-handler';
+import { AIHandler, envKeySource } from '@jxburros/ai-nugget';
 
 const handler = new AIHandler({ keySource: envKeySource() });
 
@@ -116,8 +116,8 @@ connection) ready for `anthropic`/`google` rather than showing an empty list.
 
 The nugget deliberately has no concept of "the app's currently selected
 model" — that's app policy, same as governance (see Non-goals). The pattern
-that has worked well for apps building a model-picker UI on top of
-`AIHandler`:
+that has worked well for apps building a model-picker UI on top of the
+AI Nugget handler:
 
 1. **Keep `provider`/`baseUrl` on a server-side allowlist; never take them
    from client input.** A `Connection`'s `provider`/`baseUrl` decide where
@@ -171,7 +171,7 @@ this pattern.
   use `'*'` in a provider's prefix list to allow non-chat operation IDs.
   The default redactor covers common provider token formats and generic bearer
   tokens, with session-resolved keys always added exactly.
-- **Agent layer (`@jxburros/ai-handler/agent`):** `defineTool` + light JSON-schema
+- **Agent layer (`@jxburros/ai-nugget/agent`):** `defineTool` + light JSON-schema
   arg validation (object-ness, `required`, top-level `properties[key].type` —
   not full JSON Schema: no `enum`, nested schemas, `oneOf`, bounds, `pattern`,
   array `items`, or `additionalProperties`; validate again inside
@@ -190,7 +190,7 @@ this pattern.
   serialized as plain text turns, not provider-native tool-call wire format.
 
 ```ts
-import { runAgent, defineTool } from '@jxburros/ai-handler/agent';
+import { runAgent, defineTool } from '@jxburros/ai-nugget/agent';
 ```
 
 ## Commands
@@ -242,7 +242,7 @@ with the local `test:live` invocation above.
 
 Two supported paths, in order of preference:
 
-1. **GitHub Packages (primary).** `@jxburros/ai-handler` publishes to GitHub
+1. **GitHub Packages (primary).** `@jxburros/ai-nugget` publishes to GitHub
    Packages on every published GitHub release (`.github/workflows/publish.yml`).
    Consuming apps add a project `.npmrc`:
 
@@ -252,7 +252,7 @@ Two supported paths, in order of preference:
    ```
 
    (GitHub Packages requires an authenticated token even for public-repo
-   packages.) Then `npm install @jxburros/ai-handler@^0.3.0` and update via
+   packages.) Then `npm install @jxburros/ai-nugget@^0.3.0` and update via
    ordinary version-bump PRs — fix once here, bump the dependency in each app.
 2. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
    build (`src/` + `VERSION.txt` with a version + content-hash stamp) for repos
@@ -289,7 +289,7 @@ bundler hits this, vendor `dist/` (real `.js` + `.d.ts` pairs) instead of
 
 `.claude/skills/` contains Agent Skills — task-specific guides that Claude Code
 picks up automatically and that any AI agent (or human) can read as plain
-Markdown: `use-ai-handler` (integrating the nugget into an app),
+Markdown: `use-ai-nugget` (integrating the nugget into an app),
 `build-agent-loop` (the agent/tool-calling layer), `add-provider` (extending
 the provider profile table), and `develop-nugget` (invariants and validation
 for changes to this repo). `AGENTS.md` remains the always-on baseline; the

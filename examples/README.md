@@ -2,7 +2,7 @@
 
 Runnable scripts against the built package (`npm run build` first). Each
 example imports from `../dist/`; a consuming app would instead import from
-`@jxburros/ai-handler` / `@jxburros/ai-handler/agent`.
+`@jxburros/ai-nugget` / `@jxburros/ai-nugget/agent`.
 
 | File | Shows |
 |---|---|

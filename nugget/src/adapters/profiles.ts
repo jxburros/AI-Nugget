@@ -61,7 +61,7 @@ export const PROVIDER_PROFILES: Record<string, ProviderProfile> = {
     engine: 'openaiChat',
     defaultBaseUrl: 'https://openrouter.ai/api/v1',
     auth: 'bearer',
-    defaultHeaders: { 'HTTP-Referer': 'https://github.com/jxburros/AI-Nugget', 'X-Title': 'ai-handler' },
+    defaultHeaders: { 'HTTP-Referer': 'https://github.com/jxburros/AI-Nugget', 'X-Title': 'ai-nugget' },
     listModelsPath: '/models',
     capabilities: HOSTED_CLOUD,
     quirks: { supportsUsageInStream: true },

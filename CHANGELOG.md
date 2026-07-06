@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `ai-handler` are recorded here. This project follows the
+All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
 ## 2026-07-06 - Claude
@@ -50,7 +50,7 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ### Changed
 
-- Added Agent Skills under `.claude/skills/` so AI agents can develop successfully with the nugget: `use-ai-handler` (integrating the library into a consuming app), `build-agent-loop` (the `@jxburros/ai-handler/agent` tool-calling layer), `add-provider` (extending the provider profile table), and `develop-nugget` (repo invariants, validation commands, and changelog format).
+- Added Agent Skills under `.claude/skills/` so AI agents can develop successfully with the nugget: `use-ai-nugget` (integrating the library into a consuming app), `build-agent-loop` (the `@jxburros/ai-nugget/agent` tool-calling layer), `add-provider` (extending the provider profile table), and `develop-nugget` (repo invariants, validation commands, and changelog format).
 - Pointed to the skills from `AGENTS.md` (so all agents discover them) and added an "Agent skills" section to `README.md`.
 
 ### Not completed
@@ -222,7 +222,7 @@ env-gated live smoke tests (design §10 / development-plan Phase 2).
 
 ## 2026-07-05 - Claude
 
-Completes the `ai-handler` nugget from the working scaffold described in
+Completes the AI Nugget from the working scaffold described in
 `ai-handler-handoff.md` up to the v0.2.0 milestone (core pipeline + provider
 contract suite + agent layer). Bumped `version` to `0.2.0`.
 

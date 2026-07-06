@@ -1,6 +1,6 @@
 ---
 name: develop-nugget
-description: Contribute changes to the ai-handler nugget itself — invariants to preserve, required reading order, validation commands (Node + browser tests, build, nugget regen), and the changelog format. Use before making any change to src/, tests/, or the build in this repository, and when preparing a change for handoff.
+description: Contribute changes to the AI Nugget itself — invariants to preserve, required reading order, validation commands (Node + browser tests, build, nugget regen), and the changelog format. Use before making any change to src/, tests/, or the build in this repository, and when preparing a change for handoff.
 ---
 
 # Developing the nugget itself
