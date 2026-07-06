@@ -92,6 +92,14 @@ its specific loaded model better should configure behavior explicitly (e.g.
 
 Access via `profileFor(provider, baseUrl).capabilities`.
 
+**These are provider-level defaults, not per-model guarantees.** A specific
+model behind a "hosted" provider can still lack reliable native tool-calling
+(and a specific local model behind a "local" provider can have it) — this
+matters most for OpenRouter, Ollama, LM Studio, vLLM, and any
+`openai-compat` endpoint, where the model actually loaded is opaque to the
+profile table. A caller that knows its model better should pass an explicit
+`toolMode` (agent layer) rather than rely on the capability default.
+
 ## What's implemented
 
 - **Core:** message-based contracts (`types.ts`), typed `AIError` + `classify()`,
@@ -124,8 +132,12 @@ Access via `profileFor(provider, baseUrl).capabilities`.
   use `'*'` in a provider's prefix list to allow non-chat operation IDs.
   The default redactor covers common provider token formats and generic bearer
   tokens, with session-resolved keys always added exactly.
-- **Agent layer (`@jxburros/ai-handler/agent`):** `defineTool` + JSON-schema arg
-  validation, `runAgent()` model↔tool loop over the full handler pipeline,
+- **Agent layer (`@jxburros/ai-handler/agent`):** `defineTool` + light JSON-schema
+  arg validation (object-ness, `required`, top-level `properties[key].type` —
+  not full JSON Schema: no `enum`, nested schemas, `oneOf`, bounds, `pattern`,
+  array `items`, or `additionalProperties`; validate again inside
+  `tool.execute` if you need stricter guarantees), `runAgent()` model↔tool loop
+  over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
   `stopReason`s, `ApprovalGate` for side-effecting tools (deny is fed back to the
   model as data), and `native` / `promptJson` / `auto` tool modes. `auto` (the
@@ -172,6 +184,20 @@ Config env vars: `AI_HANDLER_LIVE_PROVIDER`, `AI_HANDLER_LIVE_MODEL`,
 `AI_HANDLER_LIVE_BASE_URL`, `AI_HANDLER_LIVE_KEY` (literal) or
 `AI_HANDLER_LIVE_KEY_ENV` (key from an env var), `AI_HANDLER_LIVE_JSON`,
 `AI_HANDLER_LIVE_TOOLS`.
+
+**Live provider matrix (`.github/workflows/live-matrix.yml`).** The default
+CI workflow only exercises mocked fetch responses, so subtle live-wire
+behavior differences (OpenAI, Anthropic, Google, OpenRouter, and local
+runtimes each drift independently) can't surface there. `live-matrix.yml`
+runs the same `tests/live-smoke.test.ts` suite against real endpoints —
+manually (`workflow_dispatch`) or on a weekly schedule — never on push/PR, so
+it can't block or flake a normal CI run. Each matrix entry reads its API key
+from a same-named repository secret (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GOOGLE_API_KEY`, `OPENROUTER_API_KEY`) and skips itself with a notice if that
+secret isn't configured, so you only need to add secrets for the providers
+you actually use. Local runtimes (Ollama, llama.cpp, LM Studio, vLLM) aren't
+in the matrix since they need a reachable server; smoke-test those manually
+with the local `test:live` invocation above.
 
 ## Distribution
 

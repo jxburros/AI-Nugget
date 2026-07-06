@@ -13,15 +13,56 @@ export function extractJson(text) {
             return parsed.value;
     }
     for (const [open, close] of [['{', '}'], ['[', ']']]) {
-        const start = text.indexOf(open);
-        const end = text.lastIndexOf(close);
-        if (start >= 0 && end > start) {
-            const parsed = tryParse(text.slice(start, end + 1));
+        for (const span of balancedSpans(text, open, close)) {
+            const parsed = tryParse(span);
             if (parsed.ok)
                 return parsed.value;
         }
     }
     return null;
+}
+/**
+ * Yields each top-level `open`/`close` balanced substring of `text`, tracking
+ * nesting depth and skipping over string-literal content (including escapes)
+ * so a stray brace inside a string or trailing prose can't prematurely close
+ * or extend a span. Used instead of first-`indexOf`/last-`lastIndexOf` so
+ * multiple JSON regions (or JSON followed by unrelated braces) don't get
+ * spliced into one bogus span.
+ */
+function* balancedSpans(text, open, close) {
+    let depth = 0;
+    let spanStart = -1;
+    let inString = false;
+    let escaped = false;
+    for (let i = 0; i < text.length; i += 1) {
+        const ch = text[i];
+        if (inString) {
+            if (escaped)
+                escaped = false;
+            else if (ch === '\\')
+                escaped = true;
+            else if (ch === '"')
+                inString = false;
+            continue;
+        }
+        if (ch === '"') {
+            inString = true;
+            continue;
+        }
+        if (ch === open) {
+            if (depth === 0)
+                spanStart = i;
+            depth += 1;
+            continue;
+        }
+        if (ch === close && depth > 0) {
+            depth -= 1;
+            if (depth === 0 && spanStart >= 0) {
+                yield text.slice(spanStart, i + 1);
+                spanStart = -1;
+            }
+        }
+    }
 }
 export function extractJsonWithSchema(text, parse) {
     const value = extractJson(text);

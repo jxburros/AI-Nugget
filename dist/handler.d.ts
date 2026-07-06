@@ -43,5 +43,6 @@ export declare class AIHandler {
     private record;
     private redact;
     private redactedError;
+    private redactedCause;
 }
 //# sourceMappingURL=handler.d.ts.map

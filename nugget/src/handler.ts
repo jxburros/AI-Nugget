@@ -84,8 +84,17 @@ export class AIHandler {
       return;
     }
     const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata };
-    if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
-      const error = new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
+    try {
+      if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
+        const error = new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
+        await this.recordFailure(callId, conn, req, startedAt, 1, error);
+        yield { type: 'error', error: this.redactedError(error) };
+        return;
+      }
+    } catch (errorValue) {
+      // A throwing beforeCall hook is a recorded, redacted outcome too — not
+      // an uncaught throw that skips telemetry and the redaction guarantee.
+      const error = fromUnknown(errorValue, conn.provider);
       await this.recordFailure(callId, conn, req, startedAt, 1, error);
       yield { type: 'error', error: this.redactedError(error) };
       return;
@@ -352,8 +361,18 @@ export class AIHandler {
       provider: error.provider,
       raw: error.raw === undefined ? undefined : this.redact(error.raw),
       retryAfterMs: error.retryAfterMs,
-      cause: error.cause,
+      cause: this.redactedCause(error.cause),
     });
+  }
+
+  private redactedCause(cause: unknown): unknown {
+    if (cause instanceof Error) {
+      const redacted = new Error(this.redact(cause.message));
+      redacted.name = cause.name;
+      redacted.stack = undefined;
+      return redacted;
+    }
+    return cause;
   }
 }
 
