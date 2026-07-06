@@ -1,5 +1,15 @@
 # AGENTS.md
 
+## Skills
+
+Task-specific guides for AI agents live in `.claude/skills/` (Claude Code
+loads them automatically; other agents can read the `SKILL.md` files directly):
+
+- `use-ai-handler` — integrating the nugget into a consuming app
+- `build-agent-loop` — tool-calling / agent loops via `@jxburros/ai-handler/agent`
+- `add-provider` — adding or changing a provider profile
+- `develop-nugget` — invariants, validation, and changelog for changes to this repo
+
 ## Required Reading
 
 - Read `README.md` before changing public behavior.
