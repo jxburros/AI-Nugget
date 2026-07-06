@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adapterFor, PROVIDER_PROFILES, profileFor } from '../src/index.js';
+import { adapterFor, allowlistPolicy, PROVIDER_PROFILES, profileFor } from '../src/index.js';
 import { applyAuth } from '../src/adapters/profiles.js';
 
 describe('provider profiles', () => {
@@ -41,6 +41,11 @@ describe('provider profiles', () => {
   it('merges profile default headers under caller overrides (openrouter attribution)', () => {
     const merged = applyAuth(PROVIDER_PROFILES['openrouter']!, 'k', { 'HTTP-Referer': 'https://app.test', 'X-Title': 'My App' });
     expect(merged).toEqual({ 'X-Title': 'My App', 'HTTP-Referer': 'https://app.test', authorization: 'Bearer k' });
+    expect(applyAuth(PROVIDER_PROFILES['openrouter']!, 'k', {})).toEqual({
+      'HTTP-Referer': 'https://github.com/jxburros/AI-Nugget',
+      'X-Title': 'ai-handler',
+      authorization: 'Bearer k',
+    });
   });
 
   it('marks local quirks: key-optional, model-optional, health path', () => {
@@ -73,5 +78,12 @@ describe('provider profiles', () => {
   it('treats the openai-compat escape hatch and unknown providers as conservative local defaults', () => {
     expect(PROVIDER_PROFILES['openai-compat']!.capabilities).toEqual({ nativeTools: false, jsonMode: false, local: true, embeddable: true });
     expect(profileFor('some-new-provider', 'https://example.test/v1').capabilities).toEqual({ nativeTools: false, jsonMode: false, local: true, embeddable: true });
+  });
+
+  it('fails closed for providers absent from allowlistPolicy', () => {
+    const policy = allowlistPolicy({ openai: ['gpt-'] });
+    expect(policy.checkModel('openai', 'gpt-5-mini')).toEqual({ allowed: true });
+    expect(policy.checkModel('anthropic', 'claude-test')).toEqual({ allowed: false, reason: 'No models are allowed for provider anthropic' });
+    expect(allowlistPolicy({ openai: ['*'] }).checkModel('openai', '__listModels__')).toEqual({ allowed: true });
   });
 });

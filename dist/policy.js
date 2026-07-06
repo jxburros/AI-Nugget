@@ -15,8 +15,8 @@ export function allowlistPolicy(prefixesByProvider) {
         checkModel(provider, model) {
             const prefixes = prefixesByProvider[provider];
             if (!prefixes || prefixes.length === 0)
-                return { allowed: true };
-            return prefixes.some((prefix) => model.startsWith(prefix))
+                return { allowed: false, reason: `No models are allowed for provider ${provider}` };
+            return prefixes.some((prefix) => prefix === '*' || model.startsWith(prefix))
                 ? { allowed: true }
                 : { allowed: false, reason: `Model is not allowed for provider ${provider}` };
         },

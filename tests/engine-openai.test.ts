@@ -76,10 +76,31 @@ describe('openaiChat engine contract', () => {
     const body = calls[0]!.body as Record<string, any>;
     expect(body.response_format).toEqual({ type: 'json_object' });
     expect(body.tools[0].function.name).toBe('t');
-    expect(body.max_tokens).toBe(128);
+    expect(body.max_completion_tokens).toBe(128);
+    expect(body.max_tokens).toBeUndefined();
     expect(body.stream_options).toEqual({ include_usage: true });
     expect(calls[0]!.url).toBe('https://api.test/v1/chat/completions');
     expect(calls[0]!.headers.authorization).toBe('Bearer sk-test');
+  });
+
+  it('uses json_schema response_format when an OpenAI profile receives a schema', async () => {
+    const { calls } = mockFetch(sseResponse([{ choices: [{ delta: { content: '{}' }, finish_reason: 'stop' }] }]));
+    await collect(openai().stream(resolved('openai'), chatReq({
+      responseFormat: { type: 'json', schema: { type: 'object', properties: { ok: { type: 'boolean' } } } },
+    })));
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.response_format).toEqual({
+      type: 'json_schema',
+      json_schema: { name: 'response', schema: { type: 'object', properties: { ok: { type: 'boolean' } } } },
+    });
+  });
+
+  it('keeps max_tokens for local OpenAI-compatible profiles', async () => {
+    const { calls } = mockFetch(sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    await collect(adapterFor('llamacpp').stream(resolved('llamacpp', { baseUrl: 'http://localhost:8080/v1' }), chatReq({ maxTokens: 64 })));
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.max_tokens).toBe(64);
+    expect(body.max_completion_tokens).toBeUndefined();
   });
 
   it('omits stream_options.include_usage for providers whose quirk profile does not confirm support', async () => {

@@ -19,12 +19,21 @@ export function validateToolArgs(tool, call) {
         if (!(key in args) || spec.type === undefined)
             continue;
         const value = args[key];
-        const ok = (spec.type === 'array' && Array.isArray(value)) ||
-            (spec.type === 'null' && value === null) ||
-            (spec.type !== 'array' && spec.type !== 'null' && typeof value === spec.type);
+        const ok = matchesType(value, spec.type);
         if (!ok)
             return { ok: false, message: `Tool ${tool.name} argument ${key} must be ${spec.type}` };
     }
     return { ok: true, args };
+}
+function matchesType(value, type) {
+    if (type === 'array')
+        return Array.isArray(value);
+    if (type === 'integer')
+        return typeof value === 'number' && Number.isInteger(value);
+    if (type === 'null')
+        return value === null;
+    if (type === 'object')
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
+    return typeof value === type;
 }
 //# sourceMappingURL=tools.js.map

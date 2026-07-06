@@ -39,6 +39,8 @@ export class GoogleAdapter implements ProviderAdapter {
       for await (const line of chunks) {
         const parsed = safeParse(line);
         const record = asRecord(parsed);
+        const promptFeedback = asRecord(record?.promptFeedback);
+        if (!firstCandidate(record) && promptFeedback?.blockReason) finish = 'SAFETY';
         for (const part of candidateParts(record)) {
           const partText = asString(asRecord(part)?.text);
           if (partText) {
@@ -82,15 +84,18 @@ export class GoogleAdapter implements ProviderAdapter {
 }
 
 function body(req: ChatRequest): Record<string, unknown> {
-  const systemText = req.messages.filter((m) => m.role === 'system').map((m) => typeof m.content === 'string' ? m.content : '').join('\n\n');
+  const systemText = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n');
+  const jsonMode = req.responseFormat?.type === 'json' && !req.tools?.length;
+  const responseSchema = req.responseFormat?.type === 'json' ? req.responseFormat.schema : undefined;
   const payload: Record<string, unknown> = {
-    contents: req.messages.filter((m) => m.role !== 'system').map(toGoogleContent),
+    contents: toGoogleContents(req.messages.filter((m) => m.role !== 'system')),
     generationConfig: {
       temperature: req.temperature,
       topP: req.topP,
       maxOutputTokens: req.maxTokens,
       stopSequences: req.stopSequences,
-      responseMimeType: req.responseFormat?.type === 'json' ? 'application/json' : undefined,
+      responseMimeType: jsonMode ? 'application/json' : undefined,
+      responseSchema: jsonMode ? responseSchema : undefined,
     },
   };
   if (systemText) payload.systemInstruction = { parts: [{ text: systemText }] };
@@ -104,22 +109,31 @@ function body(req: ChatRequest): Record<string, unknown> {
   return payload;
 }
 
+function toGoogleContents(messages: ChatMessage[]): Record<string, unknown>[] {
+  const contents: Record<string, unknown>[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    if (message.role !== 'tool') {
+      contents.push(toGoogleContent(message));
+      continue;
+    }
+    const parts: unknown[] = [];
+    while (index < messages.length && messages[index]?.role === 'tool') {
+      const toolMessage = messages[index]!;
+      parts.push({ functionResponse: { name: toolMessage.name ?? 'unknown', response: toolResponseObject(toolMessage) } });
+      index += 1;
+    }
+    index -= 1;
+    contents.push({ role: 'user', parts });
+  }
+  return contents;
+}
+
 function toGoogleContent(m: ChatMessage): Record<string, unknown> {
   if (m.role === 'tool') {
-    let responseObj: Record<string, unknown> = { content: typeof m.content === 'string' ? m.content : '' };
-    if (typeof m.content === 'string') {
-      try {
-        const parsed: unknown = JSON.parse(m.content);
-        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          responseObj = parsed as Record<string, unknown>;
-        }
-      } catch {
-        // keep string fallback
-      }
-    }
     return {
       role: 'user',
-      parts: [{ functionResponse: { name: m.name ?? 'unknown', response: responseObj } }],
+      parts: [{ functionResponse: { name: m.name ?? 'unknown', response: toolResponseObject(m) } }],
     };
   }
   if (m.role === 'assistant' && m.toolCalls?.length) {
@@ -136,6 +150,23 @@ function toGoogleContent(m: ChatMessage): Record<string, unknown> {
         ? { inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
         : { text: part.text ?? '' }),
   };
+}
+
+function textContent(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content;
+  if (!content) return '';
+  return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
+}
+
+function toolResponseObject(message: ChatMessage): Record<string, unknown> {
+  if (typeof message.content !== 'string') return { content: textContent(message.content) };
+  try {
+    const parsed: unknown = JSON.parse(message.content);
+    if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed as Record<string, unknown>;
+  } catch {
+    // keep string fallback
+  }
+  return { content: message.content };
 }
 
 async function* singleJsonLine(res: Response): AsyncIterable<string> {

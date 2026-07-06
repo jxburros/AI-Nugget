@@ -33,6 +33,7 @@ export declare class AIHandler {
         ok: boolean;
         message: string;
     }>;
+    private runProbe;
     private resolveConnection;
     private acquire;
     private release;
@@ -41,5 +42,6 @@ export declare class AIHandler {
     private recordFailure;
     private record;
     private redact;
+    private redactedError;
 }
 //# sourceMappingURL=handler.d.ts.map

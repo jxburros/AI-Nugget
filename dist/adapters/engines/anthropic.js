@@ -140,7 +140,7 @@ export class AnthropicAdapter {
     }
 }
 function body(req, jsonMode) {
-    const system = req.messages.filter((m) => m.role === 'system').map((m) => typeof m.content === 'string' ? m.content : '').join('\n\n') || undefined;
+    const system = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n') || undefined;
     const base = {
         model: req.model,
         max_tokens: req.maxTokens ?? 4096,
@@ -148,7 +148,7 @@ function body(req, jsonMode) {
         top_p: req.topP,
         stop_sequences: req.stopSequences,
         system,
-        messages: req.messages.filter((m) => m.role !== 'system').map(toAnthropicMessage),
+        messages: toAnthropicMessages(req.messages.filter((m) => m.role !== 'system')),
         stream: true,
     };
     if (jsonMode) {
@@ -167,6 +167,25 @@ function body(req, jsonMode) {
             base.tool_choice = { type: 'none' };
     }
     return base;
+}
+function toAnthropicMessages(messages) {
+    const out = [];
+    for (let index = 0; index < messages.length; index += 1) {
+        const message = messages[index];
+        if (message.role !== 'tool') {
+            out.push(toAnthropicMessage(message));
+            continue;
+        }
+        const content = [];
+        while (index < messages.length && messages[index]?.role === 'tool') {
+            const toolMessage = messages[index];
+            content.push({ type: 'tool_result', tool_use_id: toolMessage.toolCallId ?? '', content: textContent(toolMessage.content) });
+            index += 1;
+        }
+        index -= 1;
+        out.push({ role: 'user', content });
+    }
+    return out;
 }
 function toAnthropicMessage(m) {
     // tool result messages map to a user turn carrying a tool_result content block.
@@ -191,6 +210,13 @@ function toAnthropicMessage(m) {
             ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
             : { type: 'text', text: part.text ?? '' }),
     };
+}
+function textContent(content) {
+    if (typeof content === 'string')
+        return content;
+    if (!content)
+        return '';
+    return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 function parseResponse(data) {
     const record = asRecord(data);

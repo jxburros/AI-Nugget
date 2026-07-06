@@ -18,17 +18,16 @@ async function* run(opts, resolveResult, rejectResult) {
     const messages = [...opts.messages];
     const toolMode = resolveToolMode(opts);
     const maxSteps = opts.budget?.maxSteps ?? 8;
-    const deadlineAt = opts.budget?.deadlineMs ? Date.now() + opts.budget.deadlineMs : null;
-    let usage = { estimated: true };
+    const agentSignal = createAgentSignal(opts.signal, opts.budget?.deadlineMs);
+    let usage;
     let finalText = '';
     let step = 0;
+    let settled = false;
     try {
         while (step < maxSteps) {
             step += 1;
-            if (opts.signal?.aborted)
-                return yield* yieldDone('canceled');
-            if (deadlineAt && Date.now() > deadlineAt)
-                return yield* yieldDone('deadline');
+            if (agentSignal.signal?.aborted)
+                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
             yield emit(opts, { type: 'step_start', step });
             const calls = [];
             let stepText = '';
@@ -38,7 +37,7 @@ async function* run(opts, resolveResult, rejectResult) {
                 model: opts.model,
                 messages: requestMessages,
                 tools: toolMode === 'promptJson' ? undefined : opts.tools,
-                signal: opts.signal,
+                signal: agentSignal.signal,
                 metadata: { ...opts.metadata, agentStep: step },
             })) {
                 if (event.type === 'delta')
@@ -48,7 +47,7 @@ async function* run(opts, resolveResult, rejectResult) {
                 if (event.type === 'error')
                     streamFailure = event.error;
                 if (event.type === 'done') {
-                    usage = mergeUsage(usage, event.result.usage);
+                    usage = usage ? mergeUsage(usage, event.result.usage) : event.result.usage;
                     if (toolMode === 'promptJson' && calls.length === 0)
                         calls.push(...callsFromPromptJson(stepText));
                 }
@@ -57,12 +56,16 @@ async function* run(opts, resolveResult, rejectResult) {
             // A handler-level failure (auth, policy, cancel, exhausted retries) must
             // stop the loop honestly rather than looking like an empty completion.
             if (streamFailure)
-                return yield* yieldDone(streamFailure.kind === 'canceled' ? 'canceled' : 'error');
+                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error');
             finalText = stepText;
-            messages.push({ role: 'assistant', content: stepText, toolCalls: calls.length ? calls : undefined });
+            messages.push(toolMode === 'promptJson'
+                ? { role: 'assistant', content: stepText }
+                : { role: 'assistant', content: stepText, toolCalls: calls.length ? calls : undefined });
             if (calls.length === 0)
                 return yield* yieldDone('finished');
             for (const call of calls) {
+                if (agentSignal.signal?.aborted)
+                    return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
                 const tool = opts.tools.find((candidate) => candidate.name === call.name);
                 if (!tool) {
                     yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
@@ -80,17 +83,25 @@ async function* run(opts, resolveResult, rejectResult) {
                         continue;
                     }
                     const approval = await opts.approval({ call, tool, step });
+                    if (agentSignal.signal?.aborted)
+                        return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
                     if (approval === 'deny') {
                         yield* appendToolDenied(opts, messages, step, call, 'Denied by approval gate');
                         continue;
                     }
-                    if (approval !== 'allow')
-                        args = approval.modifiedArguments;
+                    if (approval !== 'allow') {
+                        const modified = validateToolArgs(tool, { ...call, arguments: approval.modifiedArguments });
+                        if (!modified.ok) {
+                            yield* appendToolError(opts, messages, step, call, modified.message);
+                            continue;
+                        }
+                        args = modified.args;
+                    }
                 }
                 yield emit(opts, { type: 'tool_start', step, call });
                 try {
                     const result = await tool.execute(args, {
-                        signal: opts.signal ?? new AbortController().signal,
+                        signal: agentSignal.signal ?? new AbortController().signal,
                         callId: call.id,
                         step,
                         metadata: opts.metadata,
@@ -103,21 +114,30 @@ async function* run(opts, resolveResult, rejectResult) {
                     yield* appendToolError(opts, messages, step, call, message);
                 }
             }
-            const totalTokens = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+            const totalTokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
             if (opts.budget?.maxTokens && totalTokens > opts.budget.maxTokens)
                 return yield* yieldDone('budget');
-            await sleep(0, opts.signal);
+            await sleep(0, agentSignal.signal);
         }
         return yield* yieldDone('max_steps');
     }
     catch (error) {
-        const result = makeResult(finalText, messages, usage, step, error instanceof AIError && error.kind === 'canceled' ? 'canceled' : 'error');
+        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
+        settled = true;
         resolveResult(result);
         yield emit(opts, { type: 'agent_done', result });
         rejectResult(error);
     }
+    finally {
+        agentSignal.dispose();
+        if (!settled) {
+            const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, 'canceled');
+            resolveResult(result);
+        }
+    }
     function* yieldDone(stopReason) {
-        const result = makeResult(finalText, messages, usage, step, stopReason);
+        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason);
+        settled = true;
         resolveResult(result);
         yield emit(opts, { type: 'agent_done', result });
     }
@@ -150,8 +170,20 @@ function withPromptJsonInstruction(messages, tools) {
             role: 'system',
             content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
         },
-        ...messages,
+        ...messages.map(toPromptJsonMessage),
     ];
+}
+function toPromptJsonMessage(message) {
+    if (message.role === 'tool') {
+        return {
+            role: 'user',
+            content: `Tool ${message.name ?? message.toolCallId ?? 'unknown'} returned: ${textContent(message.content)}`,
+        };
+    }
+    return {
+        role: message.role,
+        content: textContent(message.content),
+    };
 }
 /**
  * Parses a promptJson tool directive into zero or more calls. Accepts the single
@@ -183,5 +215,41 @@ function callsFromPromptJson(text) {
         });
     }
     return calls;
+}
+function textContent(content) {
+    if (typeof content === 'string')
+        return content;
+    if (!content)
+        return '';
+    return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
+}
+function createAgentSignal(signal, deadlineMs) {
+    if (!signal && deadlineMs === undefined)
+        return { signal: undefined, timedOut: () => false, dispose: () => undefined };
+    const controller = new AbortController();
+    let didTimeOut = false;
+    let timer;
+    const onAbort = () => controller.abort(signal?.reason);
+    if (signal) {
+        if (signal.aborted)
+            onAbort();
+        else
+            signal.addEventListener('abort', onAbort, { once: true });
+    }
+    if (deadlineMs !== undefined) {
+        timer = setTimeout(() => {
+            didTimeOut = true;
+            controller.abort(new AIError(`Agent deadline exceeded after ${deadlineMs}ms`, { kind: 'budget_exceeded', retryable: false }));
+        }, deadlineMs);
+    }
+    return {
+        signal: controller.signal,
+        timedOut: () => didTimeOut,
+        dispose() {
+            if (timer)
+                clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+        },
+    };
 }
 //# sourceMappingURL=loop.js.map

@@ -7,10 +7,11 @@ talking to AI model providers through one pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-It runs identically in Node ≥ 18, the browser main thread, and Web Workers using
+It runs identically in Node ≥ 20, the browser main thread, and Web Workers using
 only `fetch`, `ReadableStream`, `AbortController`, and `TextDecoder`. It is
 intentionally **not** a router, prompt library, memory system, or secrets vault:
 apps choose models, own prompts, store secrets, and decide what policy to enforce.
+The package is MIT licensed.
 
 See `design.md` for the full contract. The original evidence base, phased
 build/adoption plan, and dev handoff are archived under `docs/archive/`.
@@ -47,7 +48,7 @@ an OpenAI-compatible provider is a table row, not another copy of the SSE loop.
 
 | Engine | Providers | Streaming | Tools | JSON mode |
 |---|---|---|---|---|
-| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format: json_object` |
+| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
 | `anthropic` | `anthropic` | SSE (`content_block_delta`) | `tool_use` blocks (streamed) | forced-tool JSON mode |
 | `google` | `google` | SSE (`streamGenerateContent`) | `functionDeclarations` | `responseMimeType` |
 | `ollama` | `ollama` | NDJSON | native `tools` | `format: json` |
@@ -103,14 +104,26 @@ Access via `profileFor(provider, baseUrl).capabilities`.
   OpenAI-compatible engine only sends `stream_options: { include_usage: true }`
   when the profile's `supportsUsageInStream` quirk confirms the server expects
   it — local servers (llama.cpp, LM Studio, vLLM) that don't have the quirk set
-  never receive the option.
+  never receive the option. The OpenAI and Azure OpenAI profiles send
+  `max_completion_tokens` for `maxTokens`; local/OpenAI-compatible profiles keep
+  `max_tokens` for compatibility. Google receives `responseSchema` for JSON mode
+  only when native tools are absent, avoiding Gemini's JSON-with-tools rejection.
 - **Pipeline (`AIHandler`):** policy → keys → `beforeCall` → concurrency/min-interval
   → jittered retry (honoring `Retry-After`) → redacted `CallRecord` telemetry →
   `afterCall`, with `chat`, `stream`, `listModels`, `testConnection`. Every call —
-  success or failure — produces exactly one redacted telemetry record.
+  success, failure, or consumer-abandoned stream — produces one redacted telemetry
+  record. Retries stop once user-visible output has been emitted, and telemetry
+  or `afterCall` failures never re-execute an already-successful provider call.
+  `listModels()` and `testConnection()` use explicit operation IDs
+  (`__listModels__`, `__testConnection__`) so policy and telemetry can see those
+  key-bearing probes too.
 - **Seams:** `KeySource` (`env`/`literal`/`memory`/chain + ref parsing),
   `Redactor` (default secret patterns + session-resolved key redaction),
   neutral `GovernancePolicy` (`blocklistPolicy`/`allowlistPolicy`/`composePolicies`).
+  `allowlistPolicy` fails closed for providers omitted from the configured map;
+  use `'*'` in a provider's prefix list to allow non-chat operation IDs.
+  The default redactor covers common provider token formats and generic bearer
+  tokens, with session-resolved keys always added exactly.
 - **Agent layer (`@jxburros/ai-handler/agent`):** `defineTool` + JSON-schema arg
   validation, `runAgent()` model↔tool loop over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
@@ -122,7 +135,8 @@ Access via `profileFor(provider, baseUrl).capabilities`.
   `promptJson`, and an explicit `toolMode` always overrides the default.
   `promptJson` mode accepts a single `{"tool","input"}` directive or a batched
   `{"tools":[…]}` (a bare array works too), so the model can request several
-  tools in one turn just like native tool-calling.
+  tools in one turn just like native tool-calling. Prompt-JSON history is
+  serialized as plain text turns, not provider-native tool-call wire format.
 
 ```ts
 import { runAgent, defineTool } from '@jxburros/ai-handler/agent';
@@ -132,7 +146,7 @@ import { runAgent, defineTool } from '@jxburros/ai-handler/agent';
 
 ```bash
 npm install
-npm test            # Vitest contract suite in Node (71 tests)
+npm test            # Vitest contract suite in Node (97 tests; live tests skipped unless env-gated)
 npm run test:browser   # same suite in headless Chromium (proves isomorphism)
 npm run build       # tsc → dist/ (also the typecheck)
 npm run build:nugget   # writes a vendorable nugget/ stamped with version + content hash
@@ -181,8 +195,8 @@ Two supported paths, in order of preference:
    from the source of truth detectable.
 
 `dist/` (ESM + `.d.ts`) is the package's own build output. `dist/` and
-`nugget/` are both committed and regenerated from `src/`; CI fails if either is
-stale.
+`nugget/` are both committed and regenerated from `src/`; `prepublishOnly`
+rebuilds both, and CI fails if either is stale.
 
 ## Examples
 

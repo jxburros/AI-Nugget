@@ -40,7 +40,7 @@ describe('google engine contract', () => {
     expect(done?.type === 'done' && done.result.finishReason).toBe('tool');
   });
 
-  it('builds contents, systemInstruction, tools, and json config in the request', async () => {
+  it('builds contents, systemInstruction, tools, and avoids json MIME while tools are present', async () => {
     const { calls } = mockFetch(sseResponse([{ candidates: [{ content: { parts: [{ text: '{}' }] }, finishReason: 'STOP' }] }]));
     await collect(google().stream(conn(), chatReq({
       messages: [
@@ -54,7 +54,7 @@ describe('google engine contract', () => {
     })));
     const body = calls[0]!.body as Record<string, any>;
     expect(body.systemInstruction.parts[0].text).toBe('be terse');
-    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.responseMimeType).toBeUndefined();
     expect(body.tools[0].functionDeclarations[0].name).toBe('get_weather');
     const modelTurn = body.contents.find((c: any) => c.role === 'model');
     expect(modelTurn.parts[0]).toEqual({ functionCall: { name: 'get_weather', args: { city: 'NYC' } } });
@@ -62,6 +62,45 @@ describe('google engine contract', () => {
     expect(fnResponse.parts[0].functionResponse.name).toBe('get_weather');
     expect(calls[0]!.url).toContain(':streamGenerateContent?alt=sse');
     expect(calls[0]!.headers['x-goog-api-key']).toBe('sk-test');
+  });
+
+  it('groups parallel tool responses into one user turn', async () => {
+    const { calls } = mockFetch(sseResponse([{ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] }]));
+    await collect(google().stream(conn(), chatReq({
+      messages: [
+        { role: 'user', content: 'weather and time?' },
+        { role: 'assistant', content: '', toolCalls: [
+          { id: 'c1', name: 'get_weather', arguments: { city: 'NYC' } },
+          { id: 'c2', name: 'get_time', arguments: { city: 'NYC' } },
+        ] },
+        { role: 'tool', toolCallId: 'c1', name: 'get_weather', content: '{"temp":70}' },
+        { role: 'tool', toolCallId: 'c2', name: 'get_time', content: '{"time":"noon"}' },
+      ],
+      tools: [
+        { name: 'get_weather', description: 'w', parameters: { type: 'object' } },
+        { name: 'get_time', description: 't', parameters: { type: 'object' } },
+      ],
+    })));
+    const body = calls[0]!.body as Record<string, any>;
+    const functionResponseTurns = body.contents.filter((c: any) => c.parts.some((p: any) => p.functionResponse));
+    expect(functionResponseTurns).toHaveLength(1);
+    expect(functionResponseTurns[0].parts.map((p: any) => p.functionResponse.name)).toEqual(['get_weather', 'get_time']);
+  });
+
+  it('maps prompt-level safety blocks without candidates to content_filter', async () => {
+    mockFetch(sseResponse([{ promptFeedback: { blockReason: 'SAFETY' } }]));
+    const events = await collect(google().stream(conn(), chatReq()));
+    const done = events.at(-1);
+    expect(done?.type === 'done' && done.result.finishReason).toBe('content_filter');
+  });
+
+  it('sends responseSchema in JSON mode when tools are absent', async () => {
+    const { calls } = mockFetch(sseResponse([{ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] }, finishReason: 'STOP' }] }]));
+    const schema = { type: 'object', properties: { ok: { type: 'boolean' } } };
+    await collect(google().stream(conn(), chatReq({ responseFormat: { type: 'json', schema } })));
+    const body = calls[0]!.body as Record<string, any>;
+    expect(body.generationConfig.responseMimeType).toBe('application/json');
+    expect(body.generationConfig.responseSchema).toEqual(schema);
   });
 
   it('maps SAFETY finishReason to content_filter', async () => {

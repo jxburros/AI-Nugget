@@ -49,11 +49,17 @@ export function memoryKeySource(values: Record<string, string | null | undefined
 export function chainKeySources(...sources: KeySource[]): KeySource {
   return {
     async resolve(ref) {
+      let missing = false;
       for (const source of sources) {
         const result = await source.resolve(ref);
-        if (result.ok || result.reason !== 'denied') return result;
+        if (result.ok) return result;
+        if (result.reason === 'locked') return result;
+        if (result.reason === 'missing') {
+          missing = true;
+          continue;
+        }
       }
-      return { ok: false, reason: 'denied' };
+      return missing ? { ok: false, reason: 'missing' } : { ok: false, reason: 'denied' };
     },
   };
 }

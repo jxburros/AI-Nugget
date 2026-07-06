@@ -108,21 +108,31 @@ export async function* textLines(res) {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
-    for (;;) {
-        const { value, done } = await reader.read();
-        if (done)
-            break;
-        buffer += decoder.decode(value, { stream: true });
-        let newlineIndex;
-        while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, newlineIndex);
-            buffer = buffer.slice(newlineIndex + 1);
-            yield line;
+    let completed = false;
+    try {
+        for (;;) {
+            const { value, done } = await reader.read();
+            if (done) {
+                completed = true;
+                break;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            let newlineIndex;
+            while ((newlineIndex = buffer.indexOf('\n')) >= 0) {
+                const line = buffer.slice(0, newlineIndex);
+                buffer = buffer.slice(newlineIndex + 1);
+                yield line;
+            }
         }
+        buffer += decoder.decode();
+        if (buffer.trim())
+            yield buffer;
     }
-    buffer += decoder.decode();
-    if (buffer.trim())
-        yield buffer;
+    finally {
+        if (!completed)
+            await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+    }
 }
 function tolerantJson(raw) {
     try {

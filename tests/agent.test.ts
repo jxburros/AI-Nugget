@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIHandler, memoryKeySource, type CallRecord, type Connection } from '../src/index.js';
 import { defineTool, runAgent, type AgentEvent, type ApprovalGate } from '../src/agent/index.js';
-import { mockFetch, sseResponse } from './helpers.js';
+import { mockFetch, sseResponse, streamingResponse } from './helpers.js';
 
 const connection: Connection = { id: 'c1', provider: 'openai', keyRef: { kind: 'none' } };
 
@@ -34,6 +34,13 @@ const echo = defineTool<{ msg: string }, { echoed: string }>({
   description: 'Echo a message back',
   parameters: { type: 'object', properties: { msg: { type: 'string' } }, required: ['msg'] },
   execute: (args) => ({ echoed: args.msg }),
+});
+
+const add = defineTool<{ count: number }, { count: number }>({
+  name: 'add',
+  description: 'Add one',
+  parameters: { type: 'object', properties: { count: { type: 'integer' } }, required: ['count'] },
+  execute: (args) => ({ count: args.count + 1 }),
 });
 
 async function drain(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]> {
@@ -99,6 +106,28 @@ describe('agent loop', () => {
     expect(captured).toEqual([{ path: '/safe/x' }]);
   });
 
+  it('validates modifiedArguments from the approval gate before executing', async () => {
+    const captured: unknown[] = [];
+    const writeFile = defineTool({
+      name: 'write_file', description: 'write', sideEffects: true,
+      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+      execute: (args) => { captured.push(args); return { written: true }; },
+    });
+    const modify: ApprovalGate = async () => ({ modifiedArguments: { path: 123 } });
+    mockFetch(toolStep('write_file', { path: '/etc/x' }), textStep('fixed'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [writeFile], messages: [{ role: 'user', content: 'write' }], approval: modify });
+    const events = await drain(agent);
+    expect(captured).toEqual([]);
+    expect(events.some((e) => e.type === 'tool_result' && e.isError && /must be string/i.test(String((e.result as any).error)))).toBe(true);
+  });
+
+  it('accepts integer JSON schema tool arguments', async () => {
+    mockFetch(toolStep('add', { count: 2 }), textStep('3'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [add], messages: [{ role: 'user', content: 'add' }] });
+    const events = await drain(agent);
+    expect(events.some((e) => e.type === 'tool_result' && !e.isError && (e.result as any).count === 3)).toBe(true);
+  });
+
   it('stops with max_steps when the model keeps calling tools', async () => {
     mockFetch(toolStep('echo', { msg: 'a' }));
     const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], budget: { maxSteps: 1 } });
@@ -123,6 +152,15 @@ describe('agent loop', () => {
     });
     mockFetch(toolStep('slow', {}), textStep('never reached'));
     const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [slow], messages: [{ role: 'user', content: 'go' }], budget: { deadlineMs: 10, maxSteps: 5 } });
+    await drain(agent);
+    const result = await agent.result;
+    expect(result.stopReason).toBe('deadline');
+  });
+
+  it('uses deadlineMs to abort an in-flight model call', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init: RequestInit = {}) =>
+      streamingResponse([], { signal: init.signal ?? undefined, hangUntilAbort: true }));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], budget: { deadlineMs: 5, maxSteps: 5 } });
     await drain(agent);
     const result = await agent.result;
     expect(result.stopReason).toBe('deadline');
@@ -179,6 +217,16 @@ describe('agent loop', () => {
     expect(system.content).toContain('echo');
     // promptJson mode must NOT send native tools
     expect(body.tools).toBeUndefined();
+  });
+
+  it('serializes promptJson history as plain text instead of native tool wire format', async () => {
+    const { calls } = mockFetch(textStep(JSON.stringify({ tool: 'echo', input: { msg: 'plain' } })), textStep('done'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'promptJson' });
+    await drain(agent);
+    const secondBody = calls[1]!.body as Record<string, any>;
+    expect(JSON.stringify(secondBody.messages)).not.toContain('tool_calls');
+    expect(JSON.stringify(secondBody.messages)).not.toContain('tool_call_id');
+    expect(secondBody.messages.some((m: any) => m.role === 'user' && /Tool echo returned/.test(m.content))).toBe(true);
   });
 
   it('auto mode sends native tools for a hosted provider with reliable tool-calling', async () => {

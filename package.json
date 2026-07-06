@@ -4,29 +4,53 @@
   "private": false,
   "type": "module",
   "description": "Small isomorphic AI model handler nugget for provider calls, policy, redaction, telemetry, and agent loops.",
+  "license": "MIT",
+  "author": "jxburros",
+  "keywords": [
+    "ai",
+    "llm",
+    "openai",
+    "anthropic",
+    "gemini",
+    "ollama",
+    "typescript",
+    "telemetry"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jxburros/AI-Nugget.git"
   },
+  "bugs": {
+    "url": "https://github.com/jxburros/AI-Nugget/issues"
+  },
+  "homepage": "https://github.com/jxburros/AI-Nugget#readme",
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
-      "import": "./dist/agent/index.js"
+      "import": "./dist/agent/index.js",
+      "default": "./dist/agent/index.js"
     }
   },
   "files": [
-    "dist",
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
     "nugget",
     "README.md",
-    "AGENTS.md",
-    "CLAUDE.md"
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -35,7 +59,7 @@
     "test:live": "vitest run tests/live-smoke.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:nugget": "node scripts/build-nugget.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm run build:nugget"
   },
   "devDependencies": {
     "@types/node": "^22.15.21",

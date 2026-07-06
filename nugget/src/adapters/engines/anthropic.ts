@@ -127,7 +127,7 @@ export class AnthropicAdapter implements ProviderAdapter {
 }
 
 function body(req: ChatRequest, jsonMode: boolean): Record<string, unknown> {
-  const system = req.messages.filter((m) => m.role === 'system').map((m) => typeof m.content === 'string' ? m.content : '').join('\n\n') || undefined;
+  const system = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n') || undefined;
   const base: Record<string, unknown> = {
     model: req.model,
     max_tokens: req.maxTokens ?? 4096,
@@ -135,7 +135,7 @@ function body(req: ChatRequest, jsonMode: boolean): Record<string, unknown> {
     top_p: req.topP,
     stop_sequences: req.stopSequences,
     system,
-    messages: req.messages.filter((m) => m.role !== 'system').map(toAnthropicMessage),
+    messages: toAnthropicMessages(req.messages.filter((m) => m.role !== 'system')),
     stream: true,
   };
   if (jsonMode) {
@@ -150,6 +150,26 @@ function body(req: ChatRequest, jsonMode: boolean): Record<string, unknown> {
     else if (req.toolChoice === 'none') base.tool_choice = { type: 'none' };
   }
   return base;
+}
+
+function toAnthropicMessages(messages: ChatMessage[]): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [];
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]!;
+    if (message.role !== 'tool') {
+      out.push(toAnthropicMessage(message));
+      continue;
+    }
+    const content: unknown[] = [];
+    while (index < messages.length && messages[index]?.role === 'tool') {
+      const toolMessage = messages[index]!;
+      content.push({ type: 'tool_result', tool_use_id: toolMessage.toolCallId ?? '', content: textContent(toolMessage.content) });
+      index += 1;
+    }
+    index -= 1;
+    out.push({ role: 'user', content });
+  }
+  return out;
 }
 
 function toAnthropicMessage(m: ChatMessage): Record<string, unknown> {
@@ -173,6 +193,12 @@ function toAnthropicMessage(m: ChatMessage): Record<string, unknown> {
       ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
       : { type: 'text', text: part.text ?? '' }),
   };
+}
+
+function textContent(content: ChatMessage['content']): string {
+  if (typeof content === 'string') return content;
+  if (!content) return '';
+  return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 
 function parseResponse(data: unknown): { text: string; inputTokens?: number; outputTokens?: number; stopReason?: string; toolCalls: ToolCall[] } {

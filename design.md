@@ -14,7 +14,7 @@
 
 1. **One implementation of each provider protocol.** Wire protocols (OpenAI-compatible chat, Anthropic messages, Gemini generateContent, Ollama native) each exist exactly once as a *protocol engine*; the long tail of providers are thin, data-driven *profiles* on top (see §6). Today the OpenAI-compatible protocol alone is implemented three separate times across the portfolio (report §5).
 2. **Message-based, streaming-first, tool-capable.** `messages[]` with roles, image parts, and tool calls; every adapter can stream; non-streaming providers are normalized into the same event stream (the AI-Server-Studio pattern: buffered result → single `delta` → `done`).
-3. **Isomorphic and dependency-free.** Runs identically in Node ≥ 18, browser main thread, and Web Workers, using only `fetch`, `ReadableStream`, `AbortController`, and `TextDecoder`. No SDKs (Blobsmith drops `@google/genai` for a raw-fetch Gemini adapter). No Node built-ins in the core.
+3. **Isomorphic and dependency-free.** Runs identically in Node ≥ 20, browser main thread, and Web Workers, using only `fetch`, `ReadableStream`, `AbortController`, and `TextDecoder`. No SDKs (Blobsmith drops `@google/genai` for a raw-fetch Gemini adapter). No Node built-ins in the core.
 4. **Policy inside the pipeline, not beside it.** Governance, redaction, telemetry, and approval hooks run on *every* call path by construction — the lesson from Blobsmith's worker-only governance and AI-Server-Studio's unwired routing rules. The pipeline ships **neutral**: the policy seam is where an app *can* enforce rules, not a place the library imposes its own.
 5. **Agentic behavior as a primitive, not a framework.** The nugget ships the *mechanics* every agent needs — tool schemas, the model↔tool loop, step/budget limits, approval gates, streamed agent events — so each app can build full or custom agents without reinventing the loop. What the agent *does* (its tools, prompts, memory, UI) stays app-side.
 6. **Honest failure.** Typed, classified errors; failures always reach the telemetry sink (AI-model-test's "errors get a row too" contract); deterministic fallbacks are the caller's job but the handler must never mask a failure as success (locus-os's "no pretend runtime" principle).
@@ -280,6 +280,12 @@ export class AIHandler {
 7. telemetry.record(record); hooks.afterCall(record)
 ```
 
+`listModels()` and `testConnection()` run through the same key, policy,
+`beforeCall`, concurrency, redaction, telemetry, and `afterCall` seams using
+operation IDs (`__listModels__`, `__testConnection__`) in the `model` field.
+Apps using `allowlistPolicy` can permit those deliberately with a `'*'` prefix
+for the provider.
+
 ```ts
 export interface GovernancePolicy {
   checkModel(provider: string, model: string):
@@ -363,6 +369,8 @@ interface ProviderProfile {
     modelOptional?: boolean;      // llama.cpp serves one model
     urlTemplate?: string;         // azure-openai deployment paths
     supportsUsageInStream?: boolean;
+    maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
+    supportsJsonSchema?: boolean;
     maxTokensRequired?: boolean;  // anthropic
   };
   listModelsPath?: string;        // '/models', '/api/tags', '/v1/models'
@@ -372,8 +380,8 @@ interface ProviderProfile {
 
 | Provider key | Engine | Default base URL | Auth | Notes / quirks |
 |---|---|---|---|---|
-| `openai` | openaiChat | `https://api.openai.com/v1` | bearer | reference profile |
-| `azure-openai` | openaiChat | (required) | `api-key` header | deployment URL template + `api-version` query |
+| `openai` | openaiChat | `https://api.openai.com/v1` | bearer | reference profile; sends `max_completion_tokens`; supports JSON schema response format |
+| `azure-openai` | openaiChat | (required) | `api-key` header | deployment URL template + `api-version` query; sends `max_completion_tokens`; supports JSON schema response format |
 | `openrouter` | openaiChat | `https://openrouter.ai/api/v1` | bearer | attribution headers (`HTTP-Referer`, `X-Title`) from profile defaults, overridable via `conn.headers`; rich `/models` metadata → `ModelInfo.contextWindow`/`capabilities`; one key fronting hundreds of models makes this the **broadest-coverage cloud profile** — a first-class citizen, not an afterthought |
 | `groq` | openaiChat | `https://api.groq.com/openai/v1` | bearer | |
 | `deepseek` | openaiChat | `https://api.deepseek.com/v1` | bearer | |
@@ -541,7 +549,7 @@ Design rules carried over from the portfolio:
 
 ## 10. Testing strategy
 
-- **Engine contract tests over fixtures:** one shared suite runs every engine against recorded wire fixtures (happy path, streaming, buffered-despite-stream, native tool-call roundtrip, 401/429/500, malformed JSON, truncated stream, abort mid-stream).
+- **Engine contract tests over fixtures:** one shared suite runs every engine against recorded wire fixtures (happy path, streaming, buffered-despite-stream, native tool-call roundtrip, 401/429/500, malformed JSON, truncated stream, abort mid-stream, abandoned stream cancellation).
 - **Profile tests:** light per-profile assertions — URL/auth/header construction, quirk behavior (llama.cpp modelOptional, Anthropic maxTokens injection, Azure URL template), model-listing parse. This keeps wide provider coverage cheap.
 - **Agent-loop tests:** scripted mock adapter drives the loop deterministically — tool roundtrip, invalid-args self-correction, approval deny-and-continue, each budget stopReason, mid-tool abort, promptJson fallback parity with native mode.
 - **Live smoke tests (optional, env-gated):** against local Ollama / llama.cpp when present; never in CI by default (the "missing keys never fail the deterministic path" doctrine applies to the handler's own tests).

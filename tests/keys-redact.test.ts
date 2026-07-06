@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultRedactor, memoryKeySource, parseKeyRef } from '../src/index.js';
+import { chainKeySources, createDefaultRedactor, memoryKeySource, parseKeyRef } from '../src/index.js';
 
 describe('keys and redaction', () => {
   it('parses env, brokered, stored, none, and literal refs', () => {
@@ -15,5 +15,14 @@ describe('keys and redaction', () => {
     const source = memoryKeySource({ OPENAI_API_KEY: 'sk-abcdefghijklmnopqrstuvwxyz' });
     await expect(source.resolve({ kind: 'env', name: 'OPENAI_API_KEY' })).resolves.toEqual({ ok: true, apiKey: 'sk-abcdefghijklmnopqrstuvwxyz' });
     expect(createDefaultRedactor(['plain-secret']).redact('token sk-abcdefghijklmnopqrstuvwxyz and plain-secret')).toBe('token [REDACTED] and [REDACTED]');
+    expect(createDefaultRedactor().redact('Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456')).toBe('Authorization: [REDACTED]');
+    expect(createDefaultRedactor().redact('groq gsk_abcdefghijklmnopqrstuvwxyz123456')).toBe('groq [REDACTED]');
+  });
+
+  it('continues chainKeySources past missing sources but stops on locked or denied chains', async () => {
+    const missing = memoryKeySource({});
+    const fallback = memoryKeySource({ OPENAI_API_KEY: 'sk-fallback' });
+    await expect(chainKeySources(missing, fallback).resolve({ kind: 'env', name: 'OPENAI_API_KEY' })).resolves.toEqual({ ok: true, apiKey: 'sk-fallback' });
+    await expect(chainKeySources(missing).resolve({ kind: 'env', name: 'OPENAI_API_KEY' })).resolves.toEqual({ ok: false, reason: 'missing' });
   });
 });
