@@ -122,7 +122,7 @@ async function* run(opts, resolveResult, rejectResult) {
         return yield* yieldDone('max_steps');
     }
     catch (error) {
-        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : error instanceof AIError && error.kind === 'canceled' ? 'canceled' : 'error');
+        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
         settled = true;
         resolveResult(result);
         yield emit(opts, { type: 'agent_done', result });
@@ -219,6 +219,8 @@ function callsFromPromptJson(text) {
 function textContent(content) {
     if (typeof content === 'string')
         return content;
+    if (!content)
+        return '';
     return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 function createAgentSignal(signal, deadlineMs) {

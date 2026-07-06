@@ -154,6 +154,7 @@ function toGoogleContent(m: ChatMessage): Record<string, unknown> {
 
 function textContent(content: ChatMessage['content']): string {
   if (typeof content === 'string') return content;
+  if (!content) return '';
   return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 

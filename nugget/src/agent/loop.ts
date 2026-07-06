@@ -171,7 +171,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     }
     return yield* yieldDone('max_steps');
   } catch (error) {
-    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : error instanceof AIError && error.kind === 'canceled' ? 'canceled' : 'error');
+    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
@@ -272,6 +272,7 @@ function callsFromPromptJson(text: string): ToolCall[] {
 
 function textContent(content: ChatMessage['content']): string {
   if (typeof content === 'string') return content;
+  if (!content) return '';
   return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 

@@ -32,6 +32,8 @@ function matchesType(value, type) {
         return typeof value === 'number' && Number.isInteger(value);
     if (type === 'null')
         return value === null;
+    if (type === 'object')
+        return typeof value === 'object' && value !== null && !Array.isArray(value);
     return typeof value === type;
 }
 //# sourceMappingURL=tools.js.map

@@ -41,5 +41,6 @@ function matchesType(value: unknown, type: string): boolean {
   if (type === 'array') return Array.isArray(value);
   if (type === 'integer') return typeof value === 'number' && Number.isInteger(value);
   if (type === 'null') return value === null;
+  if (type === 'object') return typeof value === 'object' && value !== null && !Array.isArray(value);
   return typeof value === type;
 }

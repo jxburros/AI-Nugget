@@ -214,6 +214,8 @@ function toAnthropicMessage(m) {
 function textContent(content) {
     if (typeof content === 'string')
         return content;
+    if (!content)
+        return '';
     return content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n');
 }
 function parseResponse(data) {
