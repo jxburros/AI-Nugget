@@ -39,6 +39,37 @@ describe('AIHandler pipeline', () => {
     expect(records[0]?.error?.kind).toBe('policy_blocked');
   });
 
+  it('records and redacts a throwing beforeCall hook instead of letting it escape uncaught', async () => {
+    const records: CallRecord[] = [];
+    const handler = new AIHandler({
+      keySource: memoryKeySource({}),
+      hooks: {
+        beforeCall: async () => {
+          throw new Error('hook exploded with secret-token-abc123');
+        },
+      },
+      telemetry: { record: (r) => records.push(r) },
+      redactor: { redact: (text) => text.replace('secret-token-abc123', '[REDACTED]') },
+    });
+    const events = await collect(handler.stream(openaiConn(), req));
+    const last = events.at(-1) as any;
+    expect(last.type).toBe('error');
+    expect(last.error.message).not.toContain('secret-token-abc123');
+    expect(records).toHaveLength(1);
+    expect(records[0]?.error?.message).not.toContain('secret-token-abc123');
+  });
+
+  it('redacts secrets in error.cause.message, not just error.message', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network died near key sk-abcdefghijklmnopqrstuvwxyz'));
+    const handler = new AIHandler({ keySource: memoryKeySource({}), retry: { maxAttempts: 1 } });
+    const events = await collect(handler.stream(openaiConn(), req));
+    const last = events.at(-1) as any;
+    expect(last.type).toBe('error');
+    expect(last.error.message).not.toContain('sk-abcdefghijklmnopqrstuvwxyz');
+    expect(last.error.cause).toBeInstanceOf(Error);
+    expect(last.error.cause.message).not.toContain('sk-abcdefghijklmnopqrstuvwxyz');
+  });
+
   it('honors Retry-After over the exponential backoff base', async () => {
     mockFetch(
       textResponse('rate limited', 429, { 'retry-after': '0' }),

@@ -1,0 +1,66 @@
+name: Live provider matrix
+
+# Runs the real-wire-path smoke suite (tests/live-smoke.test.ts) against
+# whichever hosted providers have a key configured as a repository secret.
+# Manual and scheduled only — never on push/PR — so default CI stays free of
+# live network calls, cost, and flakiness, while catching live behavior drift
+# the mocked contract suite can't see (see README "Live smoke tests").
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    name: ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: openai
+            model: gpt-4o-mini
+            key_env: OPENAI_API_KEY
+            json: '1'
+            tools: '1'
+          - provider: anthropic
+            model: claude-3-5-haiku-20241022
+            key_env: ANTHROPIC_API_KEY
+            json: '1'
+            tools: '1'
+          - provider: google
+            model: gemini-1.5-flash
+            key_env: GOOGLE_API_KEY
+            json: '1'
+            tools: '1'
+          - provider: openrouter
+            model: openai/gpt-4o-mini
+            key_env: OPENROUTER_API_KEY
+            json: '0'
+            tools: '1'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Live smoke test
+        env:
+          PROVIDER_KEY: ${{ secrets[matrix.key_env] }}
+          AI_HANDLER_LIVE: '1'
+          AI_HANDLER_LIVE_PROVIDER: ${{ matrix.provider }}
+          AI_HANDLER_LIVE_MODEL: ${{ matrix.model }}
+          AI_HANDLER_LIVE_JSON: ${{ matrix.json }}
+          AI_HANDLER_LIVE_TOOLS: ${{ matrix.tools }}
+        run: |
+          if [ -z "$PROVIDER_KEY" ]; then
+            echo "::notice::No ${{ matrix.key_env }} secret configured; skipping ${{ matrix.provider }}."
+            exit 0
+          fi
+          export "${{ matrix.key_env }}=$PROVIDER_KEY"
+          export AI_HANDLER_LIVE_KEY_ENV="${{ matrix.key_env }}"
+          npm run test:live

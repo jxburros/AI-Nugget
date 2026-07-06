@@ -60,16 +60,14 @@ export interface AgentResult {
 
 export function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & { result: Promise<AgentResult> } {
   let resolveResult!: (result: AgentResult) => void;
-  let rejectResult!: (error: unknown) => void;
-  const result = new Promise<AgentResult>((resolve, reject) => {
+  const result = new Promise<AgentResult>((resolve) => {
     resolveResult = resolve;
-    rejectResult = reject;
   });
-  const iterable = run(opts, resolveResult, rejectResult);
+  const iterable = run(opts, resolveResult);
   return Object.assign(iterable, { result });
 }
 
-async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => void, rejectResult: (error: unknown) => void): AsyncIterable<AgentEvent> {
+async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => void): AsyncIterable<AgentEvent> {
   const messages = [...opts.messages];
   const toolMode = resolveToolMode(opts);
   const maxSteps = opts.budget?.maxSteps ?? 8;
@@ -150,6 +148,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
           }
         }
         yield emit(opts, { type: 'tool_start', step, call });
+        let executed: { ok: true; result: unknown } | { ok: false; message: string };
         try {
           const result = await tool.execute(args, {
             signal: agentSignal.signal ?? new AbortController().signal,
@@ -157,10 +156,19 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
             step,
             metadata: opts.metadata,
           });
-          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(result) });
-          yield emit(opts, { type: 'tool_result', step, call, result, isError: false });
+          executed = { ok: true, result };
         } catch (error) {
-          const message = error instanceof Error ? error.message : 'Tool failed';
+          executed = { ok: false, message: error instanceof Error ? error.message : 'Tool failed' };
+        }
+        if (!executed.ok) {
+          yield* appendToolError(opts, messages, step, call, executed.message);
+          continue;
+        }
+        try {
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) });
+          yield emit(opts, { type: 'tool_result', step, call, result: executed.result, isError: false });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Tool result was not serializable';
           yield* appendToolError(opts, messages, step, call, message);
         }
       }
@@ -175,7 +183,6 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
-    rejectResult(error);
   } finally {
     agentSignal.dispose();
     if (!settled) {

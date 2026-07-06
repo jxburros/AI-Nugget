@@ -3,6 +3,26 @@
 All notable changes to `ai-handler` are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-06 - Claude
+
+### Changed
+
+- Fixed a traceability gap in `AIHandler.stream()`: a throwing `beforeCall` hook now records a failure and yields a redacted error instead of escaping the async generator uncaught (matching the existing `runProbe()` behavior for `listModels`/`testConnection`).
+- `redactedError()` now redacts `error.cause.message` in addition to `message`/`raw`, closing the one path where a secret could reach a caller unredacted.
+- Removed the dead `rejectResult` plumbing in the agent loop (`runAgent().result` only ever resolved; the reject path was unreachable on every code path) and split tool-result serialization out of the tool-execution try/catch so a non-serializable return value (e.g. a circular reference) is reported distinctly rather than mislabeled as a tool execution failure.
+- `extractJson()` now uses a nesting- and string-literal-aware balanced-span scanner instead of first-`indexOf`/last-`lastIndexOf`, so trailing prose with a stray brace, or multiple JSON regions in one response, can no longer get spliced into one bogus parse.
+- Documented `validateToolArgs()` as intentionally light validation (object-ness, `required`, top-level `properties[key].type`; no `enum`/nested schemas/`oneOf`/bounds/`pattern`/array `items`/`additionalProperties`) in code and README, and strengthened the README's provider-capabilities section to call out that capabilities are provider-level defaults, not per-model guarantees.
+- Added `.github/workflows/live-matrix.yml`: a `workflow_dispatch`/weekly-scheduled job (never on push/PR) that runs `tests/live-smoke.test.ts` against OpenAI, Anthropic, Google, and OpenRouter using per-provider repository secrets, skipping any provider whose secret isn't configured.
+- Added regression tests for all of the above (throwing `beforeCall`, `cause` redaction, non-serializable tool result, `extractJson` nesting/string cases).
+
+### Not completed
+
+- npmjs.org publishing was not enabled; GitHub Packages remains the configured registry. Publishing to npm needs an npm account/token decision from the maintainer, so it wasn't wired up unilaterally.
+
+### Notes
+
+- Validation: `npm run build`; `npm run build:nugget`; `npm test` (101 passed, 6 env-gated skips, up from 97); `npm run test:browser` (101 passed, headless Chromium).
+
 ## 2026-07-05 - Claude
 
 ### Changed

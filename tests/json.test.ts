@@ -17,6 +17,15 @@ describe('extractJson', () => {
     expect(extractJson('[{"x":1}]')).toEqual([{ x: 1 }]);
   });
 
+  it('is nesting-aware: does not splice across unrelated braces or braces inside strings', () => {
+    // A stray closing brace in trailing prose must not extend the span past the real object.
+    expect(extractJson('{"tool":"echo","input":{"msg":"hi"}} (note: see {this} for context)')).toEqual({ tool: 'echo', input: { msg: 'hi' } });
+    // Two separate JSON objects: the first balanced, parseable span wins.
+    expect(extractJson('noise {"a":1} more noise {"b":2} trailing')).toEqual({ a: 1 });
+    // A brace embedded inside a string literal must not be treated as structural.
+    expect(extractJson('prefix {"text":"a { b } c"} suffix')).toEqual({ text: 'a { b } c' });
+  });
+
   it('validates with schema helpers', () => {
     const value = extractJsonWithSchema('{"name":"Ada"}', (raw) => {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Expected object');

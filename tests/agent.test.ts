@@ -76,6 +76,22 @@ describe('agent loop', () => {
     expect(result.stopReason).toBe('finished');
   });
 
+  it('reports a non-serializable tool result as a tool error, not a false success', async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const badTool = defineTool<Record<string, never>, unknown>({
+      name: 'badTool',
+      description: 'Returns a circular structure',
+      parameters: { type: 'object', properties: {} },
+      execute: () => circular,
+    });
+    mockFetch(toolStep('badTool', {}), textStep('ok'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [badTool], messages: [{ role: 'user', content: 'go' }] });
+    const events = await drain(agent);
+    expect(events.some((e) => e.type === 'tool_result' && e.isError)).toBe(true);
+    expect(events.some((e) => e.type === 'tool_result' && !e.isError)).toBe(false);
+  });
+
   it('continues after an approval denial (deny is data, not an exception)', async () => {
     const writeFile = defineTool({
       name: 'write_file', description: 'write', sideEffects: true,
