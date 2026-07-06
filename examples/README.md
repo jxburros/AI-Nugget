@@ -12,6 +12,7 @@ example imports from `../dist/`; a consuming app would instead import from
 | `agent-native-tools.mjs` | `toolMode` left unset — `auto` resolves to native tool-calling for a hosted provider |
 | `agent-approval-gate.mjs` | An `ApprovalGate` allowing, denying, and rewriting a side-effecting tool call |
 | `telemetry.mjs` | The `TelemetrySink` seam — one redacted `CallRecord` per call |
+| `model-picker.mjs` | Model-agnostic picker: server-side connection allowlist, `listModels()` with per-connection fallback, defaults to local Ollama (no key needed) |
 
 ## Running
 
@@ -22,6 +23,7 @@ npm run build
 node examples/ollama.mjs            # requires `ollama pull llama3.2` running locally
 node examples/llamacpp.mjs          # requires llama-server on :8080
 node examples/agent-prompt-json.mjs # requires Ollama, as above
+node examples/model-picker.mjs      # requires Ollama, as above; set OPENAI_API_KEY etc. to also list hosted connections
 
 # Hosted (requires OPENAI_API_KEY)
 OPENAI_API_KEY=sk-... node examples/agent-native-tools.mjs

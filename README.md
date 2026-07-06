@@ -136,6 +136,9 @@ that has worked well for apps building a model-picker UI on top of
    fall back to an app-configured default model for connections whose engine
    doesn't implement discovery (see above).
 
+See `examples/model-picker.mjs` for a minimal runnable reference implementing
+this pattern.
+
 ## What's implemented
 
 - **Core:** message-based contracts (`types.ts`), typed `AIError` + `classify()`,
@@ -254,11 +257,27 @@ Two supported paths, in order of preference:
 2. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
    build (`src/` + `VERSION.txt` with a version + content-hash stamp) for repos
    that cannot take a package dependency. Copy it in; `VERSION.txt` makes drift
-   from the source of truth detectable.
+   from the source of truth detectable. (Bundlers that don't resolve
+   `.ts`+`.js`-suffixed imports the way `tsc` does — e.g. Turbopack — should
+   vendor `dist/` instead; see below.)
 
 `dist/` (ESM + `.d.ts`) is the package's own build output. `dist/` and
 `nugget/` are both committed and regenerated from `src/`; `prepublishOnly`
 rebuilds both, and CI fails if either is stale.
+
+**Bundler compatibility for the vendored `nugget/` path.** `nugget/src/*.ts`
+uses NodeNext-style relative imports with explicit `.js` extensions (e.g.
+`export * from './types.js'`), which `tsc` needs to resolve `.ts` files under
+`moduleResolution: bundler`/`nodenext`. Not every bundler's runtime module
+graph treats `.ts`/`.js` as interchangeable the way `tsc` does — confirmed
+with Next.js 16's Turbopack: aliasing straight at `nugget/src/index.ts`
+type-checks but fails to resolve at build/dev time (`Module not found: Can't
+resolve './types.js'`), and aliasing at the compiled `dist/index.d.ts` builds
+but silently resolves some named exports to `undefined` at runtime. If your
+bundler hits this, vendor `dist/` (real `.js` + `.d.ts` pairs) instead of
+`nugget/`, and point path aliases at its `.js` entry points (e.g.
+`dist/index.js`, `dist/agent/index.js`) — TypeScript picks up the sibling
+`.d.ts` automatically.
 
 ## Examples
 

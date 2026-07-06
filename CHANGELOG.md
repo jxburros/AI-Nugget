@@ -7,6 +7,35 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ### Changed
 
+- Documented a Turbopack/bundler-resolution caveat for the vendored `nugget/`
+  path in the README's Distribution section (`.js`-suffixed relative imports
+  resolve for `tsc` but can fail at runtime in bundlers that don't treat
+  `.ts`/`.js` as interchangeable — confirmed with Next.js 16 Turbopack) and
+  recommend vendoring `dist/` instead for those consumers.
+- Added `examples/model-picker.mjs`: a minimal, model-agnostic reference for
+  the "Letting an app's users pick a model" pattern already documented in the
+  README — a server-side connection allowlist, `listModels()` with a
+  per-connection fallback, defaulting to a local Ollama connection (no API
+  key needed) so the example never assumes any single hosted provider is
+  configured. Linked from the README section it demonstrates.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm run build` (produces `dist/` the example imports from),
+  `npm test`, `npm run build:nugget` (keep `nugget/`/`dist/` in sync so CI's
+  drift check stays green). `node examples/model-picker.mjs` run manually
+  against a local Ollama (`ollama pull llama3.2`) to confirm the fallback/
+  listing/stream path end-to-end; hosted-connection branches are exercised
+  only when their env key is set, consistent with the other examples.
+
+## 2026-07-06 - Claude
+
+### Changed
+
 - Documented `listModels()` as optional-per-adapter in the README: the `anthropic` and `google` engines don't implement it and `AIHandler.listModels()` resolves to `[]` for them (not an error), which isn't visible from the `ProviderCapabilities` table. Added a "Letting an app's users pick a model (best practice)" section covering the pattern found while building a model-picker UI against this library in a consuming app: keep `provider`/`baseUrl` on a server-side allowlist (never client input, since they control where a resolved key is sent), treat `model` as ordinary client input, and use `listModels()` with an app-configured fallback for engines that don't support discovery. Docs-only change, no code/contract changes.
 
 ### Not completed
