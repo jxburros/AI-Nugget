@@ -1,0 +1,1 @@
+{"name":"ai-nugget-prompt-mirror","private":true,"type":"module","scripts":{"dev":"node server.mjs","verify":"node --check server.mjs && node verify-install.mjs"},"dependencies":{"@jxburros/ai-nugget":"^0.3.1","express":"^4.21.2"},"engines":{"node":">=20"}}
