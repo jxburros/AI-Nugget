@@ -1,4 +1,5 @@
 import express from 'express';
+import { fileURLToPath } from 'node:url';
 import { AIHandler, envKeySource } from '@jxburros/ai-nugget';
 
 const app = express();
@@ -11,7 +12,7 @@ const connection = {
 };
 
 app.use(express.json());
-app.use(express.static(new URL('./public', import.meta.url).pathname));
+app.use(express.static(fileURLToPath(new URL('./public', import.meta.url))));
 
 app.post('/api/sprint', async (req, res) => {
   try {
@@ -22,10 +23,12 @@ app.post('/api/sprint', async (req, res) => {
         { role: 'user', content: String(req.body.goals || '').slice(0, 4000) },
       ],
     });
-    res.json(JSON.parse(result.text.match(/\{[\s\S]*\}/)[0]));
+    const match = result.text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('No JSON found in response');
+    res.json(JSON.parse(match[0]));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.listen(port, () => console.log(`http://localhost:${port}`));
+app.listen(port, () => console.log('http://localhost:' + port));

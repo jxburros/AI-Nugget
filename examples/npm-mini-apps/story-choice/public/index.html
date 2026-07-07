@@ -5,6 +5,7 @@
 <input id="premise" size="70" placeholder="The bakery begins printing fortunes on its bread.">
 <button id="start">Start</button>
 <pre id="result"></pre>
+<div id="choices"></div>
 <script>
 const history = [];
 async function play(choice) {
@@ -15,6 +16,16 @@ async function play(choice) {
   });
   const data = await response.json();
   document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+  const container = document.getElementById('choices');
+  container.innerHTML = '';
+  if (data.choices && Array.isArray(data.choices)) {
+    data.choices.forEach(c => {
+      const btn = document.createElement('button');
+      btn.textContent = c;
+      btn.onclick = () => play(c);
+      container.appendChild(btn);
+    });
+  }
 }
 document.getElementById('start').onclick = () => play();
 </script>
