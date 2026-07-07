@@ -13,6 +13,7 @@ example imports from `../dist/`; a consuming app would instead import from
 | `agent-approval-gate.mjs` | An `ApprovalGate` allowing, denying, and rewriting a side-effecting tool call |
 | `telemetry.mjs` | The `TelemetrySink` seam — one redacted `CallRecord` per call |
 | `model-picker.mjs` | Model-agnostic picker: server-side connection allowlist, `listModels()` with per-connection fallback, defaults to local Ollama (no key needed) |
+| `steel-chat/` | A small industrial-themed chatbot app: Node server + static UI, model picker, package-version badge, Forge Mode, and playful prompt helpers |
 
 ## Running
 
@@ -24,6 +25,7 @@ node examples/ollama.mjs            # requires `ollama pull llama3.2` running lo
 node examples/llamacpp.mjs          # requires llama-server on :8080
 node examples/agent-prompt-json.mjs # requires Ollama, as above
 node examples/model-picker.mjs      # requires Ollama, as above; set OPENAI_API_KEY etc. to also list hosted connections
+npm run demo:steel-chat             # launches the industrial chatbot demo on http://localhost:3210
 
 # Hosted (requires OPENAI_API_KEY)
 OPENAI_API_KEY=sk-... node examples/agent-native-tools.mjs
@@ -33,3 +35,8 @@ OPENAI_API_KEY=sk-... node examples/telemetry.mjs
 
 None of these run in CI — they hit real local or hosted endpoints, same as
 `tests/live-smoke.test.ts`.
+
+`steel-chat/` is the most app-like example in the repo: it keeps connections on
+the server-side allowlist, uses `handler.listModels()` for the picker with
+fallback defaults, calls `handler.chat()` through the normal pipeline, and
+surfaces the installed package version from `package.json` in the UI.
