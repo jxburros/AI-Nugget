@@ -1,0 +1,25 @@
+name: Verify npm mini-app examples
+on:
+  pull_request:
+    paths:
+      - 'examples/npm-mini-apps/**'
+      - '.github/workflows/npm-mini-apps.yml'
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [prompt-mirror, release-room, story-choice]
+    defaults:
+      run:
+        working-directory: examples/npm-mini-apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: examples/npm-mini-apps/${{ matrix.app }}/package.json
+      - run: npm install
+      - run: npm run verify
