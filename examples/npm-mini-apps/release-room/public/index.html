@@ -1,0 +1,18 @@
+<!doctype html>
+<title>Release Room</title>
+<h1>Release Room</h1>
+<p>Paste an album-release brain dump. Receive three next actions.</p>
+<textarea id="goals" rows="12" cols="70"></textarea>
+<button id="build">Build sprint</button>
+<pre id="result"></pre>
+<script>
+const button = document.getElementById('build');
+button.onclick = async () => {
+  const response = await fetch('/api/sprint', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ goals: document.getElementById('goals').value }),
+  });
+  document.getElementById('result').textContent = JSON.stringify(await response.json(), null, 2);
+};
+</script>
