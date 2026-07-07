@@ -26,6 +26,11 @@ export function textFromMessages(messages: ChatMessage[]): string {
   }).join('\n');
 }
 
+export function globalEnv(): Record<string, string | undefined> {
+  const maybeProcess = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
+  return maybeProcess.process?.env ?? {};
+}
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {

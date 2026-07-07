@@ -14,6 +14,7 @@ example imports from `../dist/`; a consuming app would instead import from
 | `telemetry.mjs` | The `TelemetrySink` seam — one redacted `CallRecord` per call |
 | `model-picker.mjs` | Model-agnostic picker: server-side connection allowlist, `listModels()` with per-connection fallback, defaults to local Ollama (no key needed) |
 | `steel-chat/` | A small industrial-themed chatbot app: Node server + static UI, model picker, package-version badge, Forge Mode, and playful prompt helpers |
+| `npm-mini-apps/` | Three small apps consuming the published npm package, each applying the README "Recipes" section: JSON-mode output validated with `extractJsonWithSchema`, and provider failures mapped through `AIError.kind` (see each app's `ai-error-map.mjs`) — see `npm-mini-apps/README.md` |
 
 ## Running
 

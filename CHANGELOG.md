@@ -3,6 +3,67 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-07 - Claude
+
+### Changed
+
+- Addressed the "AI Nugget integration friction" findings in
+  `DEVELOPMENT_REPORT.md` (repeated connection setup, brittle JSON
+  extraction, and generic error handling across the three
+  `examples/npm-mini-apps/` server apps):
+  - Added `envConnection()` (`src/connect.ts`, exported from the package
+    root) resolving a `Connection` + default `model` from app-owned
+    `AI_PROVIDER`/`AI_MODEL`/`AI_KEY_ENV`/`AI_BASE_URL` env vars, replacing
+    the connection-setup block every small server app was hand-rolling
+    identically. It only reads server-side env — `provider`/`baseUrl` still
+    never come from client input. Factored the shared guarded `process.env`
+    read into `src/util.ts` (`globalEnv`) and reused it from `envKeySource`.
+  - Added a "Recipes" section to `README.md` documenting `envConnection()`,
+    a canonical JSON-output-and-validation pattern using the existing
+    `extractJsonWithSchema` + `require*` guards (instead of a
+    `/\{[\s\S]*\}/` regex + `JSON.parse`), and an `AIError.kind` → HTTP
+    status/user-message matrix.
+  - Rewrote all three `examples/npm-mini-apps/*/server.mjs` to validate
+    model JSON output with `extractJsonWithSchema` (rejecting malformed
+    JSON, wrong task counts, non-numeric fields, and out-of-range meter
+    values that were previously passed through untrusted) and to map
+    `AIError.kind` to HTTP status/user-facing messages via a new copyable
+    `ai-error-map.mjs` in each app, instead of leaking `error.message`
+    through a generic 500. Left each app's connection setup inline (not
+    switched to `envConnection()`) and `verify-install.mjs` unchanged in
+    scope, since these apps pin `@jxburros/ai-nugget@^0.3.1` from the real
+    npm registry in CI and `envConnection` isn't published yet.
+  - Bumped the package to `0.4.0` (new backward-compatible export) and
+    regenerated `dist/`, `nugget/`, and `package-lock.json`.
+
+### Not completed
+
+- `envConnection()` is not yet wired into `examples/npm-mini-apps/` — doing
+  so requires those apps' `package.json` to depend on `^0.4.0` or later,
+  which requires publishing this version first. Publishing is blocked in
+  this environment the same way it was in the prior session (`npm whoami`
+  returns `ENEEDAUTH`); a maintainer needs to cut a GitHub release to
+  trigger `.github/workflows/publish.yml`.
+- Did not address the "Example-app shortcomings" or "CI limitation"
+  sections of `DEVELOPMENT_REPORT.md` — those are example-app-only gaps the
+  report itself distinguishes from AI Nugget integration friction, and the
+  Story Choice "no clickable choices" item is already stale (fixed in a
+  later commit than the report's evidence base).
+
+### Notes
+
+- Validation: `npm test` (105 passed, 6 env-gated skips), `npm run
+  test:browser` (105 passed, proves `connect.ts` isomorphism), `npm run
+  build`, `npm run build:nugget`. Manually verified end-to-end against the
+  real published `@jxburros/ai-nugget@0.3.1` package: ran `prompt-mirror`'s
+  server with an intentionally missing key and confirmed the response was
+  `{"error":"The AI service is not configured correctly."}` (no leaked
+  internal message) while the server log kept
+  `key_unavailable API key unavailable: missing`; also exercised each
+  app's new JSON-schema parser directly (three-task-count, numeric-minutes,
+  and 0-10 meter-range rejections, plus a happy path with a
+  fenced-code-block-wrapped reply) against the real package.
+
 ## 2026-07-07 - Codex
 
 ### Changed
