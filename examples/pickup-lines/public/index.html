@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pickup Line Generator · AI Nugget</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <p class="eyebrow">AI Nugget example</p>
+        <h1>Turn any thought into a <em>cute line.</em></h1>
+        <p class="intro">Bring a topic, a sentence, or a wildly specific interest. Get one playful pickup line back.</p>
+      </header>
+
+      <section class="generator" aria-label="Pickup line generator">
+        <label for="source-text">What should the line be about?</label>
+        <textarea id="source-text" rows="7" maxlength="2000" placeholder="Example: I just spent two hours rearranging my bookshelf by color and now I need someone to admire it with me."></textarea>
+        <div class="controls">
+          <label class="select-label">Connection <select id="connection-select" aria-label="AI connection"></select></label>
+          <label class="select-label">Model <input id="model-input" aria-label="Model name" /></label>
+          <button id="generate-button" type="button">Make it flirty</button>
+        </div>
+      </section>
+
+      <section class="result" aria-live="polite">
+        <p class="result-label">Your pickup line</p>
+        <p id="line-output" class="line-output">Your next little conversation starter will appear here.</p>
+        <div class="result-actions">
+          <button id="copy-button" class="quiet" type="button" disabled>Copy line</button>
+          <span id="status" role="status">Choose a connection and write something fun.</span>
+        </div>
+      </section>
+
+      <section class="ideas" aria-label="Example prompts">
+        <p>Need a spark?</p>
+        <div id="idea-buttons" class="idea-buttons"></div>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
