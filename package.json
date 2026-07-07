@@ -1,6 +1,6 @@
 {
   "name": "@jxburros/ai-nugget",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": false,
   "type": "module",
   "description": "Small isomorphic AI model nugget for provider calls, policy, redaction, telemetry, and agent loops.",
@@ -30,9 +30,6 @@
     "url": "https://github.com/jxburros/AI-Nugget/issues"
   },
   "homepage": "https://github.com/jxburros/AI-Nugget#readme",
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

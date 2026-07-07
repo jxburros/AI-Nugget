@@ -1,16 +1,47 @@
 name: Publish
 
-# Publishes @jxburros/ai-nugget to GitHub Packages. Manual/release-gated by
-# design — this is the primary dependency path for portfolio apps (see
-# README.md "Distribution"); the vendorable nugget/ folder remains the
-# fallback for repos that can't take a package dependency.
+# Publishes @jxburros/ai-nugget to both npmjs.org and GitHub Packages.
+# npmjs.org is the primary install path for consumers; GitHub Packages is kept
+# for GitHub-native workflows and portfolio repos that already consume it.
 on:
   release:
     types: [published]
 
 jobs:
-  publish:
+  validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - name: Verify release tag matches package version
+        run: |
+          node -e "const { readFileSync } = require('node:fs'); const pkg = JSON.parse(readFileSync('package.json', 'utf8')); const expected = 'v' + pkg.version; const actual = process.env.GITHUB_REF_NAME; if (actual !== expected) { console.error(`Release tag ${actual} does not match package version ${expected}`); process.exit(1); }"
+      - run: npm test
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    needs: validate
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+      - run: npm ci
+      - run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-github:
+    runs-on: ubuntu-latest
+    needs: validate
     permissions:
       contents: read
       packages: write
@@ -22,10 +53,6 @@ jobs:
           registry-url: 'https://npm.pkg.github.com'
           scope: '@jxburros'
       - run: npm ci
-      - name: Verify release tag matches package version
-        run: |
-          node -e "const { readFileSync } = require('node:fs'); const pkg = JSON.parse(readFileSync('package.json', 'utf8')); const expected = 'v' + pkg.version; const actual = process.env.GITHUB_REF_NAME; if (actual !== expected) { console.error(`Release tag ${actual} does not match package version ${expected}`); process.exit(1); }"
-      - run: npm test
-      - run: npm publish
+      - run: npm publish --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

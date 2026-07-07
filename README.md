@@ -240,11 +240,23 @@ with the local `test:live` invocation above.
 
 ## Distribution
 
-Two supported paths, in order of preference:
+Three supported paths, in order of preference:
 
-1. **GitHub Packages (primary).** `@jxburros/ai-nugget` publishes to GitHub
-   Packages on every published GitHub release (`.github/workflows/publish.yml`).
-   Consuming apps add a project `.npmrc`:
+1. **npm registry (primary).** `@jxburros/ai-nugget` publishes to
+   [npmjs.org](https://www.npmjs.com/package/@jxburros/ai-nugget) on every
+   published GitHub release (`.github/workflows/publish.yml`). Consumers install
+   from the normal npm registry:
+
+   ```bash
+   npm install @jxburros/ai-nugget@^0.3.1
+   ```
+
+   This is the default dependency path for apps: fix once here, bump the
+   dependency in each app, and let npm resolve it normally.
+2. **GitHub Packages (kept).** The same release workflow also publishes
+   `@jxburros/ai-nugget` to GitHub Packages for GitHub-native workflows and
+   existing portfolio consumers that already point at that registry. Those apps
+   add a project `.npmrc`:
 
    ```
    @jxburros:registry=https://npm.pkg.github.com
@@ -252,9 +264,8 @@ Two supported paths, in order of preference:
    ```
 
    (GitHub Packages requires an authenticated token even for public-repo
-   packages.) Then `npm install @jxburros/ai-nugget@^0.3.0` and update via
-   ordinary version-bump PRs — fix once here, bump the dependency in each app.
-2. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
+   packages.) Then `npm install @jxburros/ai-nugget@^0.3.1`.
+3. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
    build (`src/` + `VERSION.txt` with a version + content-hash stamp) for repos
    that cannot take a package dependency. Copy it in; `VERSION.txt` makes drift
    from the source of truth detectable. (Bundlers that don't resolve

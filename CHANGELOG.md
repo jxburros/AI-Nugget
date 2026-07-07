@@ -3,6 +3,30 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-07 - Codex
+
+### Changed
+
+- Bumped the package to `0.3.1`.
+- Made npmjs.org the primary package registry by removing the GitHub Packages
+  registry override from `publishConfig`.
+- Updated the release workflow to validate once, then publish independently to
+  npmjs.org with `NPM_TOKEN` and GitHub Packages with `GITHUB_TOKEN`,
+  preserving both package destinations.
+- Updated the README Distribution section so consumers install from the normal
+  npm registry by default, with GitHub Packages documented as a kept secondary
+  path and vendored `nugget/` as the fallback.
+
+### Not completed
+
+- Publishing from this workstation is blocked until npm authentication is
+  available (`npm whoami` returns `ENEEDAUTH`).
+
+### Notes
+
+- Validation: `npm ci`; `npm run build`; `npm test` (101 passed, 6 env-gated
+  skips); `npm pack --dry-run --json` (`@jxburros/ai-nugget@0.3.1`, 67 files).
+
 ## 2026-07-06 - Claude
 
 ### Changed
