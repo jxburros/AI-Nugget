@@ -1,6 +1,6 @@
 name: Publish
 
-# Publishes @jxburros/ai-handler to GitHub Packages. Manual/release-gated by
+# Publishes @jxburros/ai-nugget to GitHub Packages. Manual/release-gated by
 # design — this is the primary dependency path for portfolio apps (see
 # README.md "Distribution"); the vendorable nugget/ folder remains the
 # fallback for repos that can't take a package dependency.

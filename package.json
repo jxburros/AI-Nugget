@@ -1,9 +1,9 @@
 {
-  "name": "@jxburros/ai-handler",
+  "name": "@jxburros/ai-nugget",
   "version": "0.3.0",
   "private": false,
   "type": "module",
-  "description": "Small isomorphic AI model handler nugget for provider calls, policy, redaction, telemetry, and agent loops.",
+  "description": "Small isomorphic AI model nugget for provider calls, policy, redaction, telemetry, and agent loops.",
   "license": "MIT",
   "author": "jxburros",
   "keywords": [

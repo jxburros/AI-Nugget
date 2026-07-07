@@ -1,10 +1,10 @@
-# `ai-handler` — Reusable AI Handler Nugget: Design
+# AI Nugget — Reusable AI Model Handler Nugget: Design
 
 **Status:** Design (v1). Companion to `docs/archive/report.md` (evidence base) and `docs/archive/development-plan.md` (build/adoption phases).
 
-**Revision note (v1):** Per maintainer direction: (a) no shipped Grok/xAI blocklist — the governance seam is neutral and empty by default, and Grok is simply never an officially supported provider; (b) provider coverage widened via a protocol-engine + provider-profile architecture (OpenRouter, llama.cpp, LM Studio, Groq, vLLM, DeepSeek, Mistral, Together, Fireworks, Azure OpenAI as named providers); (c) an agent layer (`ai-handler/agent`) is now in scope — native tool-calling in the core plus a composable agent loop with approval gates.
+**Revision note (v1):** Per maintainer direction: (a) no shipped Grok/xAI blocklist — the governance seam is neutral and empty by default, and Grok is simply never an officially supported provider; (b) provider coverage widened via a protocol-engine + provider-profile architecture (OpenRouter, llama.cpp, LM Studio, Groq, vLLM, DeepSeek, Mistral, Together, Fireworks, Azure OpenAI as named providers); (c) an agent layer (`@jxburros/ai-nugget/agent`) is now in scope — native tool-calling in the core plus a composable agent loop with approval gates.
 
-**Working name:** `ai-handler`. One small, zero-dependency, isomorphic TypeScript library that owns "talk to an AI model" — and the primitive for building agentic behavior on top of it — for the whole portfolio: AI-model-test, AI-Server-Studio, Blobsmith, locus-os, and any future project.
+**Working name:** `AI Nugget`. One small, zero-dependency, isomorphic TypeScript library that owns "talk to an AI model" — and the primitive for building agentic behavior on top of it — for the whole portfolio: AI-model-test, AI-Server-Studio, Blobsmith, locus-os, and any future project.
 
 ---
 
@@ -38,7 +38,7 @@
 ## 2. Package shape
 
 ```
-ai-handler/
+ai-nugget/
 ├── src/
 │   ├── types.ts          # All public types (below)
 │   ├── errors.ts         # AIError + classify()
@@ -57,7 +57,7 @@ ai-handler/
 │   ├── agent/
 │   │   ├── tools.ts      # ToolSpec, defineTool, arg validation against JSON schema
 │   │   ├── loop.ts       # runAgent(): the model↔tool loop, budgets, approval gates
-│   │   └── index.ts      # subpath export: ai-handler/agent
+│   │   └── index.ts      # subpath export: @jxburros/ai-nugget/agent
 │   ├── keys.ts           # KeySource implementations: env, literal, memory; ref parsing
 │   ├── redact.ts         # default secret patterns (locus-os's 14) + Redactor seam
 │   └── index.ts
@@ -429,7 +429,7 @@ This directly upgrades AI-model-test's judge (regex parsing → schema-validated
 
 ---
 
-## 8. The agent layer (`ai-handler/agent`)
+## 8. The agent layer (`@jxburros/ai-nugget/agent`)
 
 A separate subpath export built entirely on the public core — nothing in `handler.ts` knows agents exist. It packages the mechanics every portfolio agent currently hand-rolls or lacks: Blobsmith's ReAct loop (5-step, prompt-JSON, in-memory tool registry) is the existing prototype; locus-os's propose/approve broker is the governance model it must plug into.
 
@@ -543,7 +543,7 @@ Design rules carried over from the portfolio:
 
 **locus-os** — the empty seam gets filled: AI Core's `RouteTarget` resolves to a `Connection`; `hooks.beforeCall` + the agent layer's `ApprovalGate` route side-effect-bearing behavior through the broker's propose/approve; `KeySource` = Secrets Core brokered refs (`secret://…`, fails closed when locked — the `'locked' | 'denied'` results exist for exactly this); `Redactor` = the existing `redactText` choke point; `TelemetrySink` = audit rows. The mock `credentials.ts` broker retires.
 
-**ai-agent-skills** — gains a `portfolio-ai-handler` skill (usage rules, guardrails, validation commands) and updates the provider map with verified facts from this effort.
+**ai-agent-skills** — gains Agent Skills for AI Nugget (usage rules, guardrails, validation commands) and updates the provider map with verified facts from this effort.
 
 ---
 

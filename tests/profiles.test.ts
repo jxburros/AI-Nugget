@@ -43,7 +43,7 @@ describe('provider profiles', () => {
     expect(merged).toEqual({ 'X-Title': 'My App', 'HTTP-Referer': 'https://app.test', authorization: 'Bearer k' });
     expect(applyAuth(PROVIDER_PROFILES['openrouter']!, 'k', {})).toEqual({
       'HTTP-Referer': 'https://github.com/jxburros/AI-Nugget',
-      'X-Title': 'ai-handler',
+      'X-Title': 'ai-nugget',
       authorization: 'Bearer k',
     });
   });

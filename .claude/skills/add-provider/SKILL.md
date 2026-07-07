@@ -1,6 +1,6 @@
 ---
 name: add-provider
-description: Add or modify an AI provider in ai-handler's profile table — engines, quirks, capabilities, auth modes, and the tests that must accompany a profile change. Use when asked to support a new model provider, change a provider's defaults, or debug provider-specific wire behavior.
+description: Add or modify an AI provider in AI Nugget's profile table — engines, quirks, capabilities, auth modes, and the tests that must accompany a profile change. Use when asked to support a new model provider, change a provider's defaults, or debug provider-specific wire behavior.
 ---
 
 # Adding or changing a provider
