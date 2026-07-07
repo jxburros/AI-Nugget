@@ -1,0 +1,334 @@
+:root {
+  --bg: #15110f;
+  --panel: rgba(34, 31, 28, 0.92);
+  --panel-2: rgba(50, 45, 40, 0.9);
+  --steel: #a6b0b8;
+  --steel-dark: #69737b;
+  --ember: #ff7a18;
+  --ember-soft: #ffb05c;
+  --hazard: #f2c230;
+  --ink: #f7f2ea;
+  --muted: #d0c2af;
+  --line: rgba(255, 255, 255, 0.12);
+  --shadow: 0 24px 70px rgba(0, 0, 0, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top, rgba(255, 122, 24, 0.16), transparent 30%),
+    linear-gradient(180deg, #2a211d 0%, #141110 65%, #0e0d0c 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.24;
+  background-image:
+    linear-gradient(45deg, transparent 0 46%, rgba(242, 194, 48, 0.28) 46% 54%, transparent 54% 100%);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.7), transparent 72%);
+}
+
+.page-shell {
+  width: min(1200px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: 1.3fr 0.8fr;
+  gap: 20px;
+  align-items: stretch;
+  margin-bottom: 20px;
+}
+
+.hero,
+.console {
+  position: relative;
+}
+
+.hero-panel,
+.control-panel,
+.chat-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(10px);
+}
+
+.hero > div:first-child {
+  background: linear-gradient(135deg, rgba(54, 48, 44, 0.9), rgba(21, 18, 16, 0.95));
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  padding: 28px;
+  box-shadow: var(--shadow);
+}
+
+.eyebrow,
+.fact-label {
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--hazard);
+  font-size: 0.77rem;
+  margin: 0 0 10px;
+}
+
+h1 {
+  margin: 0 0 12px;
+  font-size: clamp(2.4rem, 4vw, 4.2rem);
+  line-height: 0.95;
+}
+
+.subtitle {
+  max-width: 42rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+.hero-panel {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.badge {
+  display: inline-flex;
+  width: fit-content;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: linear-gradient(180deg, rgba(255, 176, 92, 0.2), rgba(255, 122, 24, 0.15));
+  border: 1px solid rgba(255, 176, 92, 0.3);
+}
+
+.fact-card {
+  padding: 18px;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    linear-gradient(135deg, rgba(91, 97, 103, 0.44), rgba(50, 45, 40, 0.5));
+  border: 1px solid var(--line);
+}
+
+.console {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 20px;
+}
+
+.control-panel,
+.chat-panel {
+  padding: 22px;
+}
+
+.control-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+label {
+  display: grid;
+  gap: 8px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+select,
+textarea {
+  width: 100%;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  grid-auto-flow: column;
+  justify-content: start;
+  gap: 10px;
+}
+
+.toggle-row input {
+  inline-size: 20px;
+  block-size: 20px;
+}
+
+button {
+  border: 0;
+  border-radius: 16px;
+  cursor: pointer;
+  padding: 12px 16px;
+  font-weight: 800;
+  transition: transform 140ms ease, filter 140ms ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+.primary {
+  background: linear-gradient(180deg, var(--ember-soft), var(--ember));
+  color: #2a1700;
+}
+
+.secondary {
+  background: linear-gradient(180deg, rgba(166, 176, 184, 0.28), rgba(105, 115, 123, 0.22));
+  color: var(--ink);
+  border: 1px solid rgba(166, 176, 184, 0.2);
+}
+
+.heat-card {
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, rgba(255, 122, 24, 0.1), rgba(166, 176, 184, 0.08));
+}
+
+.heat-header,
+.composer-actions,
+.button-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heat-track {
+  margin-top: 12px;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.heat-fill {
+  height: 100%;
+  width: 22%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ffd46b 0%, #ff7a18 58%, #ff3f1f 100%);
+  box-shadow: 0 0 18px rgba(255, 122, 24, 0.46);
+  transition: width 180ms ease;
+}
+
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 70vh;
+}
+
+.messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding-right: 6px;
+  margin-bottom: 18px;
+}
+
+.message {
+  display: grid;
+  gap: 8px;
+}
+
+.message.user {
+  justify-items: end;
+}
+
+.message-stamp {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--hazard);
+}
+
+.message-body {
+  max-width: min(100%, 720px);
+  padding: 16px 18px;
+  white-space: pre-wrap;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+.message.assistant .message-body {
+  background: linear-gradient(135deg, rgba(66, 62, 58, 0.95), rgba(29, 27, 25, 0.96));
+}
+
+.message.user .message-body {
+  background: linear-gradient(135deg, rgba(255, 176, 92, 0.18), rgba(255, 122, 24, 0.14));
+}
+
+.composer {
+  display: grid;
+  gap: 14px;
+}
+
+.status-line {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+@media (max-width: 920px) {
+  .hero,
+  .console {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-panel {
+    min-height: 60vh;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-shell {
+    width: min(100% - 20px, 1200px);
+    padding-top: 18px;
+  }
+
+  .hero > div:first-child,
+  .hero-panel,
+  .control-panel,
+  .chat-panel {
+    border-radius: 20px;
+    padding: 18px;
+  }
+
+  .composer-actions,
+  .button-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
