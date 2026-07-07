@@ -56,6 +56,7 @@
     "test:live": "vitest run tests/live-smoke.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build:nugget": "node scripts/build-nugget.mjs",
+    "demo:steel-chat": "npm run build && node examples/steel-chat/server.mjs",
     "prepublishOnly": "npm run build && npm run build:nugget"
   },
   "devDependencies": {
