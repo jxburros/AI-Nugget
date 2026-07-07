@@ -4,6 +4,7 @@ export * from './transport.js';
 export * from './json.js';
 export * from './tokens.js';
 export * from './keys.js';
+export * from './connect.js';
 export * from './redact.js';
 export * from './policy.js';
 export * from './handler.js';

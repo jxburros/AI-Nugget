@@ -1,3 +1,4 @@
+import { globalEnv } from './util.js';
 export function parseKeyRef(value) {
     const trimmed = value?.trim();
     if (!trimmed)
@@ -70,9 +71,5 @@ export function chainKeySources(...sources) {
             return missing ? { ok: false, reason: 'missing' } : { ok: false, reason: 'denied' };
         },
     };
-}
-function globalEnv() {
-    const maybeProcess = globalThis;
-    return maybeProcess.process?.env ?? {};
 }
 //# sourceMappingURL=keys.js.map

@@ -21,6 +21,10 @@ export function textFromMessages(messages) {
         return message.content.map((part) => part.text ?? '').join('');
     }).join('\n');
 }
+export function globalEnv() {
+    const maybeProcess = globalThis;
+    return maybeProcess.process?.env ?? {};
+}
 export function sleep(ms, signal) {
     if (ms <= 0)
         return Promise.resolve();

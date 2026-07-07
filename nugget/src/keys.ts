@@ -1,4 +1,5 @@
 import type { KeyRef, KeySource } from './types.js';
+import { globalEnv } from './util.js';
 
 export function parseKeyRef(value?: string | null): KeyRef {
   const trimmed = value?.trim();
@@ -62,9 +63,4 @@ export function chainKeySources(...sources: KeySource[]): KeySource {
       return missing ? { ok: false, reason: 'missing' } : { ok: false, reason: 'denied' };
     },
   };
-}
-
-function globalEnv(): Record<string, string | undefined> {
-  const maybeProcess = globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } };
-  return maybeProcess.process?.env ?? {};
 }
