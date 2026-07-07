@@ -293,8 +293,19 @@ bundler hits this, vendor `dist/` (real `.js` + `.d.ts` pairs) instead of
 ## Examples
 
 `examples/` has runnable scripts against local Ollama and llama.cpp servers,
-`promptJson` vs. native tool-calling, an `ApprovalGate`, and telemetry — see
+`promptJson` vs. native tool-calling, an `ApprovalGate`, telemetry, and a small
+industrial-themed chatbot demo under `examples/steel-chat/` — see
 `examples/README.md`.
+
+If you want a compact end-to-end app example instead of a single script, run:
+
+```bash
+npm run demo:steel-chat
+```
+
+That demo exposes a simple browser chat UI backed by `AIHandler`, discovers
+allowed connections/models server-side, and displays the current package
+version in the interface so the example stays aligned with the installed nugget.
 
 ## Agent skills
 
