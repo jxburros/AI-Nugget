@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Steel Mill Chat</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Industrial Demo Interface</p>
+          <h1>Steel Mill Chat</h1>
+          <p class="subtitle">
+            A riveted little chatbot console powered by <span id="package-name">AI Nugget</span>.
+          </p>
+        </div>
+        <div class="hero-panel">
+          <div class="badge">Package <span id="package-version">loading...</span></div>
+          <div class="fact-card">
+            <p class="fact-label">Foundry Note</p>
+            <p id="furnace-fact">Warming up the rollers...</p>
+          </div>
+        </div>
+      </header>
+
+      <main class="console">
+        <section class="control-panel">
+          <label>
+            Connection
+            <select id="connection-select"></select>
+          </label>
+          <label>
+            Model
+            <select id="model-select"></select>
+          </label>
+          <label class="toggle-row">
+            <input type="checkbox" id="forge-mode" />
+            <span>Forge Mode</span>
+          </label>
+          <button id="spark-button" class="secondary">Spark Me</button>
+          <div class="heat-card">
+            <div class="heat-header">
+              <span>Temper Meter</span>
+              <strong id="heat-label">Warm</strong>
+            </div>
+            <div class="heat-track">
+              <div id="heat-fill" class="heat-fill"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="chat-panel">
+          <div id="messages" class="messages"></div>
+          <form id="chat-form" class="composer">
+            <textarea
+              id="message-input"
+              rows="4"
+              placeholder="Ask about welding tips, code architecture, recipe ideas, or why every machine room deserves a dramatic warning label."
+            ></textarea>
+            <div class="composer-actions">
+              <div id="status-line" class="status-line">Idle at the loading bay.</div>
+              <div class="button-row">
+                <button type="button" id="clear-button" class="secondary">Clear Deck</button>
+                <button type="submit" class="primary">Send to Millie</button>
+              </div>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
