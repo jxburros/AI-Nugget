@@ -220,6 +220,27 @@ describe('AIHandler pipeline', () => {
     expect(maxInflight).toBe(1);
   });
 
+  it('does not double-delay a later caller when an aborted minInterval wait had reserved a slot', async () => {
+    const startTimes: number[] = [];
+    const ok = () => sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]);
+    mockFetch(
+      () => { startTimes.push(Date.now()); return ok(); },
+      () => { startTimes.push(Date.now()); return ok(); },
+    );
+    const handler = new AIHandler({ keySource: memoryKeySource({}), limits: { minIntervalMs: 300 } });
+    await handler.chat(openaiConn(), req);
+
+    const controller = new AbortController();
+    const aborted = handler.chat(openaiConn(), { ...req, signal: controller.signal });
+    controller.abort();
+    await expect(aborted).rejects.toMatchObject({ kind: 'canceled' });
+
+    await handler.chat(openaiConn(), req);
+    // A buggy `lastStarted` left advanced by the canceled reservation would
+    // force this call to wait ~2x minIntervalMs (~600ms) instead of ~1x.
+    expect(startTimes[1]! - startTimes[0]!).toBeLessThan(500);
+  });
+
   it('reports a healthy connection via listModels through testConnection', async () => {
     const records: CallRecord[] = [];
     mockFetch(jsonResponse({ data: [{ id: 'gpt-x' }, { id: 'gpt-y' }] }));
@@ -228,6 +249,15 @@ describe('AIHandler pipeline', () => {
     expect(result.ok).toBe(true);
     expect(records).toHaveLength(1);
     expect(records[0]?.model).toBe('__testConnection__');
+  });
+
+  it('actually probes the network for testConnection on providers without listModels (Google)', async () => {
+    const { calls } = mockFetch(jsonResponse({ models: [] }));
+    const handler = new AIHandler({ keySource: memoryKeySource({}) });
+    const googleConn: Connection = { id: 'g1', provider: 'google', keyRef: { kind: 'none' } };
+    const result = await handler.testConnection(googleConn);
+    expect(result.ok).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 
   it('lists models with source provenance', async () => {

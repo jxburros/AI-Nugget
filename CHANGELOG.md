@@ -3,6 +3,78 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-09 - Claude
+
+Addresses the correctness/operational findings in
+`AI Nugget Comprehensive Review & Au.md`.
+
+### Changed
+
+- **Fixed the Node engine declaration.** `package.json` `engines.node` was
+  `>=20`, but `vitest` → `rolldown` requires `^20.19.0 || >=22.12.0`; on an
+  older Node 20 patch, `rolldown`'s native binding fails to resolve. Bumped
+  `engines.node` to the accurate range and added `.nvmrc` (`22`).
+- **Fixed `crypto.randomUUID()` inconsistency in `src/agent/loop.ts`.**
+  `callsFromPromptJson` called `crypto.randomUUID()` directly instead of the
+  `globalThis.crypto?.randomUUID?.() ?? fallback` pattern used everywhere else
+  (`handler.ts`, all four engines), which could throw in a runtime without a
+  global `crypto`. Added the same `randomId()` fallback helper.
+- **Fixed a pacing bug in `AIHandler`'s `minIntervalMs` (`src/handler.ts`
+  `acquire()`).** `lastStarted` was advanced to reserve the next call's start
+  time *before* the pacing `sleep()`, but was never rolled back if that sleep
+  was aborted (e.g. the caller's `AbortSignal` fired while waiting). A
+  canceled call's reservation would still delay every later call by an extra
+  `minIntervalMs`. `acquire()` now restores the prior `lastStarted` on abort,
+  but only if no other caller has since paced itself off the aborted
+  reservation (which must keep that spacing). Added a regression test that
+  fails without the fix (observed ~2x `minIntervalMs` delay pre-fix, ~1x
+  after).
+- **Fixed `testConnection` being a silent no-op for Google.** `GoogleAdapter`
+  implements neither `health` nor `listModels`, so `AIHandler.testConnection`
+  returned `{ ok: true }` without ever making a network call — a
+  misconfigured key or bad `baseUrl` would be reported as healthy. Added a
+  `GoogleAdapter.health()` that does a lightweight authenticated
+  `GET /v1beta/models`, matching the `health()` pattern the other engines
+  already use for connectivity checks.
+- Updated `README.md`: corrected the Node version claim (`Node ≥ 20` →
+  `20.19+/22.12+`), added the one-time `npx playwright install chromium` step
+  before `npm run test:browser`, and pointed at `engines`/`.nvmrc` for the
+  exact supported range.
+
+### Not completed
+
+- **Lint/format tooling, coverage thresholds, and a dependency-update
+  workflow** (the audit's other "High Priority" items) are process/tooling
+  decisions — adding a devDependency and a repo-wide style baseline is bigger
+  than the "smallest safe change" this pass targeted, so left for a
+  maintainer to opt into deliberately rather than bundled unilaterally with
+  bug fixes.
+- **`parseArgs`/`safeParse` swallowing malformed tool-call JSON or SSE
+  frames** (`openaiChat.ts`, `anthropic.ts`, `ollama.ts`) — left as-is. The
+  current behavior (empty-object args, or a skipped line plus the existing
+  `stream_anomaly` context event when no terminal `finish_reason` ever
+  arrives) is a defensible tradeoff already exercised by tests; changing it
+  to throw or emit a new anomaly event is a behavior change worth its own
+  review, not a bundled fix.
+- **`examples/npm-mini-apps/*` missing lockfiles / using `npm install` over
+  `npm ci`** — unchanged; those apps intentionally pin
+  `@jxburros/ai-nugget@^0.3.1` from the real npm registry (see the
+  2026-07-07 entry below) and touching their install story is out of scope
+  for this nugget-focused pass.
+- Escaping tool names/descriptions in the `promptJson` system prompt, and
+  Anthropic's hardcoded default `max_tokens` — both already documented as
+  app-level/intentional in the audit itself; no code change made.
+
+### Notes
+
+- Validation: `npm test` (109 passed, 6 env-gated skips, up from 105),
+  `npm run test:browser` (109 passed, headless Chromium), `npm run
+  typecheck`, `npm run build`, `npm run build:nugget` (`dist/`/`nugget/`
+  regenerated), `npm audit` (0 vulnerabilities). Confirmed the new
+  `handler.ts` regression test actually catches the pre-fix bug (temporarily
+  reverted the fix; the test failed with a ~2x delay as expected) before
+  reapplying it.
+
 ## 2026-07-07 - Claude
 
 ### Changed

@@ -124,4 +124,21 @@ describe('google engine contract', () => {
     mockFetch(textResponse('upstream boom', 503));
     await expect(google().chat(conn(), chatReq())).rejects.toMatchObject({ kind: 'server', status: 503, retryable: true });
   });
+
+  it('health() makes a real GET to /v1beta/models rather than a no-op', async () => {
+    const { calls } = mockFetch(textResponse('{"models":[]}', 200, { 'content-type': 'application/json' }));
+    const health = await google().health!(conn());
+    expect(health.ok).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.method).toBe('GET');
+    expect(calls[0]!.url).toContain('/v1beta/models');
+    expect(calls[0]!.headers['x-goog-api-key']).toBe('sk-test');
+  });
+
+  it('health() reports failure instead of a false ok:true', async () => {
+    mockFetch(textResponse('unauthorized', 401));
+    const health = await google().health!(conn());
+    expect(health.ok).toBe(false);
+    expect(health.detail).toBeTruthy();
+  });
 });

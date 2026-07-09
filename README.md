@@ -7,7 +7,7 @@ talking to AI model providers through one pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-It runs identically in Node ≥ 20, the browser main thread, and Web Workers using
+It runs identically in Node 20.19+/22.12+, the browser main thread, and Web Workers using
 only `fetch`, `ReadableStream`, `AbortController`, and `TextDecoder`. It is
 intentionally **not** a router, prompt library, memory system, or secrets vault:
 apps choose models, own prompts, store secrets, and decide what policy to enforce.
@@ -291,10 +291,15 @@ import { runAgent, defineTool } from '@jxburros/ai-nugget/agent';
 ```bash
 npm install
 npm test            # Vitest contract suite in Node (97 tests; live tests skipped unless env-gated)
+npx playwright install chromium   # one-time, before test:browser
 npm run test:browser   # same suite in headless Chromium (proves isomorphism)
 npm run build       # tsc → dist/ (also the typecheck)
 npm run build:nugget   # writes a vendorable nugget/ stamped with version + content hash
 ```
+
+Requires Node `^20.19.0` or `>=22.12.0` (see `engines` in `package.json` and
+`.nvmrc`) — the toolchain's build step (`vitest` → `rolldown`) needs a native
+binding unavailable on older Node 20 patch releases.
 
 ### Live smoke tests (optional, env-gated)
 
