@@ -5,6 +5,33 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ## 2026-07-09 - Claude
 
+### Changed
+
+- Added `docs/reviews/2026-07-09-audit.md` — a fresh comprehensive review and
+  audit of v0.4.0. Verifies the prior audit's fixes landed, scores the project
+  across nine metrics (with per-metric improvement guidance), and documents
+  new findings: a confirmed agent-loop bug where a tool returning `undefined`
+  ends the run with `stopReason: 'error'` (reproduced), deterministic
+  request-build errors being retried as `network`, the total-stream timeout
+  killing long healthy streams, `promptJson` omitting tool parameter schemas,
+  `AgentResult` lacking an `error` field, and Azure's hardcoded `api-version`.
+  Includes implementation sketches for Standard Schema typed output,
+  `providerOptions` passthrough, reasoning-event passthrough, idle stream
+  timeouts, cost accounting, and embeddings. No source changes in this entry.
+
+### Not completed
+
+- None (report only; the findings themselves are documented, not fixed).
+
+### Notes
+
+- Validation: `npm ci`, `npm test` (109 passed, 6 live-gated skipped),
+  `npm run test:browser` (109 passed in Chromium), `npm run typecheck`,
+  `npm run build`, `npm run build:nugget` + drift check — all pass on
+  Node 22.22.2. Live smoke tests not run (no provider credentials).
+
+## 2026-07-09 - Claude
+
 Addresses the correctness/operational findings in
 `AI Nugget Comprehensive Review & Au.md`.
 
