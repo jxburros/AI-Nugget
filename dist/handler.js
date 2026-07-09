@@ -241,14 +241,20 @@ export class AIHandler {
         }
         this.active += 1;
         const minInterval = this.opts.limits?.minIntervalMs ?? 0;
-        const wait = Math.max(0, this.lastStarted + minInterval - Date.now());
-        this.lastStarted = Date.now() + wait;
+        const previousLastStarted = this.lastStarted;
+        const wait = Math.max(0, previousLastStarted + minInterval - Date.now());
+        const reserved = Date.now() + wait;
+        this.lastStarted = reserved;
         try {
             if (wait)
                 await sleep(wait, signal);
         }
         catch (error) {
             this.release();
+            // Only undo our own reservation — a later caller may have already
+            // paced itself off `reserved` and must keep that spacing.
+            if (this.lastStarted === reserved)
+                this.lastStarted = previousLastStarted;
             throw error;
         }
     }

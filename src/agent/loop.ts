@@ -268,13 +268,17 @@ function callsFromPromptJson(text: string): ToolCall[] {
     const record = entry as Record<string, unknown>;
     if (typeof record.tool !== 'string') continue;
     calls.push({
-      id: crypto.randomUUID(),
+      id: randomId(),
       name: record.tool,
       arguments: record.input && typeof record.input === 'object' ? record.input : {},
       raw: JSON.stringify(record.input ?? {}),
     });
   }
   return calls;
+}
+
+function randomId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 
 function textContent(content: ChatMessage['content']): string {

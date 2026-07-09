@@ -1,9 +1,9 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
-import { postResponse, sseLines } from '../../transport.js';
+import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
 
 export class GoogleAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -79,6 +79,26 @@ export class GoogleAdapter implements ProviderAdapter {
       throw streamError(error, timeout, conn.provider);
     } finally {
       timeout.done();
+    }
+  }
+
+  /**
+   * `GoogleAdapter` has no `listModels`, so without a `health` probe
+   * `AIHandler.testConnection` would report `ok: true` without ever making a
+   * network call. `/v1beta/models` is a lightweight, key-authenticated GET
+   * that gives an honest connectivity/auth check.
+   */
+  async health(conn: ResolvedConnection): Promise<{ ok: boolean; detail?: string }> {
+    try {
+      await fetchJson(`${conn.baseUrl}/v1beta/models`, {
+        method: 'GET',
+        headers: conn.headers,
+        timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
+        provider: conn.provider,
+      });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : 'Health check failed' };
     }
   }
 }
