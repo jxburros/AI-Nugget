@@ -1,0 +1,55 @@
+{
+  "name": "@jxburros/context-nugget",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "A pliable context and memory scaffolding engine for AI apps.",
+  "license": "MIT",
+  "author": "jxburros",
+  "keywords": [
+    "ai",
+    "llm",
+    "context",
+    "memory",
+    "rag",
+    "retrieval",
+    "bm25",
+    "typescript"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js",
+      "default": "./dist/src/index.js"
+    },
+    "./ai-nugget": {
+      "types": "./dist/src/ai-nugget.d.ts",
+      "import": "./dist/src/ai-nugget.js",
+      "default": "./dist/src/ai-nugget.js"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "README.md",
+    "design.md",
+    "recipes",
+    "examples",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "typescript": "^5.8.3"
+  }
+}
