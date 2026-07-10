@@ -76,6 +76,25 @@ Capabilities are provider-level defaults, not per-model guarantees. If you know
 the actual model (e.g. a tool-capable model on Ollama, or a weak model behind
 OpenRouter), pass an explicit `toolMode` instead of trusting `auto`.
 
+### `promptJson` wire contract (for fixtures, test doubles, or local models)
+
+A real model infers the JSON-directive format from the system prompt it's
+given, so this only matters if you're scripting something that has to match
+the parser exactly (a mock provider, a `vitest` fixture, a small local model
+you're prompt-tuning) rather than relying on a model to read and follow the
+instruction itself. From `src/agent/loop.ts`:
+
+- **System message prepended on every step** (verbatim, tool list appended):
+  `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: name1: description1; name2: description2`
+- **Accepted reply shapes**, checked in this order: a single `{"tool":"name","input":{...}}` object, a batched `{"tools":[{...}, ...]}` object, or a bare `[{...}, ...]` array. Entries missing a string `tool` field are skipped, not thrown.
+- **Tool results come back as a synthetic user turn**, not a `tool`-role
+  message: `Tool <name> returned: <JSON-stringified result>`. Any other
+  history role also gets flattened to plain text (`role`/`content` only) —
+  `promptJson` never emits provider tool-call wire format.
+- **No tool calls in a reply ends the loop** (`stopReason: 'finished'`) — a
+  plain-text reply with no JSON directive is treated as the final answer, not
+  an error.
+
 ## ApprovalGate for side-effecting tools
 
 ```ts
