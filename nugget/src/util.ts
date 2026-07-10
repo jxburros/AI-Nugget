@@ -12,9 +12,16 @@ export function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * Character-count proxy for telemetry, not a token estimate. Intentionally
+ * includes base64 image payload length alongside text — a request with
+ * images is genuinely more expensive to send, so the inflated count is a
+ * feature for cost-shaped telemetry, not a bug to weight away.
+ */
 export function promptChars(messages: ChatMessage[]): number {
   return messages.reduce((sum, message) => {
     if (typeof message.content === 'string') return sum + message.content.length;
+    if (!Array.isArray(message.content)) return sum;
     return sum + message.content.reduce((partSum, part) => partSum + (part.text?.length ?? 0) + (part.imageBase64?.length ?? 0), 0);
   }, 0);
 }
@@ -22,6 +29,7 @@ export function promptChars(messages: ChatMessage[]): number {
 export function textFromMessages(messages: ChatMessage[]): string {
   return messages.map((message) => {
     if (typeof message.content === 'string') return message.content;
+    if (!Array.isArray(message.content)) return '';
     return message.content.map((part) => part.text ?? '').join('');
   }).join('\n');
 }

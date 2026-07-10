@@ -1,5 +1,5 @@
 import { profileFor } from '../adapters/profiles.js';
-import { AIError } from '../errors.js';
+import { AIError, fromUnknown } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import type { AIHandler } from '../handler.js';
@@ -56,6 +56,8 @@ export interface AgentResult {
   usage: Usage;
   steps: number;
   stopReason: 'finished' | 'max_steps' | 'budget' | 'deadline' | 'canceled' | 'error';
+  /** The terminal AIError, when the run ended abnormally and one is known. */
+  error?: AIError;
 }
 
 export function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & { result: Promise<AgentResult> } {
@@ -80,7 +82,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
   try {
     while (step < maxSteps) {
       step += 1;
-      if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+      if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
       yield emit(opts, { type: 'step_start', step });
 
       const calls: ToolCall[] = [];
@@ -106,7 +108,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
 
       // A handler-level failure (auth, policy, cancel, exhausted retries) must
       // stop the loop honestly rather than looking like an empty completion.
-      if (streamFailure) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error');
+      if (streamFailure) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error', streamFailure);
 
       finalText = stepText;
       messages.push(toolMode === 'promptJson'
@@ -115,7 +117,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       if (calls.length === 0) return yield* yieldDone('finished');
 
       for (const call of calls) {
-        if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+        if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
         const tool = opts.tools.find((candidate) => candidate.name === call.name);
         if (!tool) {
           yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
@@ -133,7 +135,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
             continue;
           }
           const approval = await opts.approval({ call, tool, step });
-          if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+          if (agentSignal.signal?.aborted) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
           if (approval === 'deny') {
             yield* appendToolDenied(opts, messages, step, call, 'Denied by approval gate');
             continue;
@@ -165,7 +167,11 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
           continue;
         }
         try {
-          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) });
+          // JSON.stringify(undefined) returns undefined (it does not throw), which would
+          // otherwise produce a ChatMessage.content the type forbids and no adapter defends
+          // against — a tool that legitimately returns nothing must still feed the model
+          // valid JSON.
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) ?? 'null' });
           yield emit(opts, { type: 'tool_result', step, call, result: executed.result, isError: false });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Tool result was not serializable';
@@ -179,7 +185,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     }
     return yield* yieldDone('max_steps');
   } catch (error) {
-    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
+    const caught = fromUnknown(error, opts.connection.provider);
+    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || caught.kind === 'canceled') ? 'canceled' : 'error', caught);
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
@@ -191,8 +198,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     }
   }
 
-  function* yieldDone(stopReason: AgentResult['stopReason']): Generator<AgentEvent> {
-    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason);
+  function* yieldDone(stopReason: AgentResult['stopReason'], error?: AIError): Generator<AgentEvent> {
+    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason, error);
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
@@ -204,8 +211,12 @@ function emit<T extends AgentEvent>(opts: AgentOptions, event: T): T {
   return event;
 }
 
-function makeResult(finalText: string, messages: ChatMessage[], usage: Usage, steps: number, stopReason: AgentResult['stopReason']): AgentResult {
-  return { finalText, messages, usage, steps, stopReason };
+function makeResult(finalText: string, messages: ChatMessage[], usage: Usage, steps: number, stopReason: AgentResult['stopReason'], error?: AIError): AgentResult {
+  return { finalText, messages, usage, steps, stopReason, ...(error ? { error } : {}) };
+}
+
+function abortErrorFrom(signal: AbortSignal | undefined): AIError | undefined {
+  return signal?.reason instanceof AIError ? signal.reason : undefined;
 }
 
 function* appendToolError(opts: AgentOptions, messages: ChatMessage[], step: number, call: ToolCall, message: string): Generator<AgentEvent> {
@@ -229,7 +240,7 @@ function withPromptJsonInstruction(messages: ChatMessage[], tools: ToolSpec[]): 
   return [
     {
       role: 'system',
-      content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
+      content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools:\n${tools.map((tool) => `${tool.name}: ${tool.description}\n  input schema: ${JSON.stringify(tool.parameters)}`).join('\n')}`,
     },
     ...messages.map(toPromptJsonMessage),
   ];

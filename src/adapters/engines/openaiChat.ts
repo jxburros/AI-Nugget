@@ -4,7 +4,7 @@ import { postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
-import { health, listOpenModels, streamError, streamTimeout } from './base.js';
+import { buildBody, health, listOpenModels, streamError, streamTimeout } from './base.js';
 
 export class OpenAIChatAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -34,7 +34,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(urlFor(conn, this.profile, req.model), buildBody(() => openAiBody(req, this.profile), conn.provider), conn.headers, timeout.signal, conn.provider);
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -51,7 +51,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         for (const call of toolCalls) yield { type: 'tool_call', call };
       } else {
         const partialTools = new Map<number, { id?: string; name?: string; raw: string }>();
-        for await (const line of sseLines(res)) {
+        for await (const line of sseLines(res, () => timeout.bump())) {
           const chunk = safeParse(line);
           const record = asRecord(chunk);
           if (!record) continue;
@@ -154,7 +154,11 @@ function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
 
 function urlFor(conn: ResolvedConnection, profile: ProviderProfile, model: string): string {
   if (profile.quirks?.urlTemplate) {
-    return profile.quirks.urlTemplate.replace('{baseUrl}', conn.baseUrl).replace('{model}', encodeURIComponent(model));
+    const apiVersion = conn.apiVersion ?? profile.quirks.azureApiVersion ?? '';
+    return profile.quirks.urlTemplate
+      .replace('{baseUrl}', conn.baseUrl)
+      .replace('{model}', encodeURIComponent(model))
+      .replace('{apiVersion}', encodeURIComponent(apiVersion));
   }
   return `${conn.baseUrl}/chat/completions`;
 }

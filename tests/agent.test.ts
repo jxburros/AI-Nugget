@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AIHandler, memoryKeySource, type CallRecord, type Connection } from '../src/index.js';
 import { defineTool, runAgent, type AgentEvent, type ApprovalGate } from '../src/agent/index.js';
-import { mockFetch, sseResponse, streamingResponse } from './helpers.js';
+import { jsonResponse, mockFetch, sseResponse, streamingResponse } from './helpers.js';
 
 const connection: Connection = { id: 'c1', provider: 'openai', keyRef: { kind: 'none' } };
 
@@ -90,6 +90,25 @@ describe('agent loop', () => {
     const events = await drain(agent);
     expect(events.some((e) => e.type === 'tool_result' && e.isError)).toBe(true);
     expect(events.some((e) => e.type === 'tool_result' && !e.isError)).toBe(false);
+  });
+
+  it('feeds null back to the model when a tool returns undefined, and the run finishes (F1)', async () => {
+    const fireAndForget = defineTool<Record<string, never>, void>({
+      name: 'fireAndForget',
+      description: 'Returns nothing',
+      parameters: { type: 'object', properties: {} },
+      execute: () => undefined,
+    });
+    const { calls } = mockFetch(toolStep('fireAndForget', {}), textStep('done'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [fireAndForget], messages: [{ role: 'user', content: 'go' }] });
+    const events = await drain(agent);
+    const result = await agent.result;
+    expect(events.some((e) => e.type === 'tool_result' && !e.isError && e.result === undefined)).toBe(true);
+    expect(result.stopReason).toBe('finished');
+    expect(result.finalText).toBe('done');
+    const secondBody = calls[1]!.body as Record<string, any>;
+    const toolMessage = secondBody.messages.find((m: any) => m.role === 'tool');
+    expect(toolMessage.content).toBe('null');
   });
 
   it('continues after an approval denial (deny is data, not an exception)', async () => {
@@ -191,6 +210,16 @@ describe('agent loop', () => {
     expect(result.stopReason).toBe('canceled');
   });
 
+  it('surfaces the terminal AIError on AgentResult.error when the model call fails (F4)', async () => {
+    mockFetch(jsonResponse({ error: { message: 'boom' } }, 500));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }] });
+    await drain(agent);
+    const result = await agent.result;
+    expect(result.stopReason).toBe('error');
+    expect(result.error).toBeDefined();
+    expect(result.error?.kind).toBe('server');
+  });
+
   it('reaches the same tool result in promptJson mode as in native mode', async () => {
     // native
     mockFetch(toolStep('echo', { msg: 'parity' }), textStep('native done'));
@@ -233,6 +262,15 @@ describe('agent loop', () => {
     expect(system.content).toContain('echo');
     // promptJson mode must NOT send native tools
     expect(body.tools).toBeUndefined();
+  });
+
+  it('includes each tool\'s input schema in the promptJson system prompt (F5)', async () => {
+    const { calls } = mockFetch(textStep('all done'));
+    const agent = runAgent({ handler: handlerWith(), connection, model: 'gpt-x', tools: [echo], messages: [{ role: 'user', content: 'go' }], toolMode: 'promptJson' });
+    await drain(agent);
+    const body = calls[0]!.body as Record<string, any>;
+    const system = body.messages.find((m: any) => m.role === 'system');
+    expect(system.content).toContain(JSON.stringify(echo.parameters));
   });
 
   it('serializes promptJson history as plain text instead of native tool wire format', async () => {

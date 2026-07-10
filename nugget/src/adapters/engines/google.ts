@@ -3,7 +3,7 @@ import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, buildBody, streamError, streamTimeout } from './base.js';
 
 export class GoogleAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -33,9 +33,9 @@ export class GoogleAdapter implements ProviderAdapter {
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
       const streamUrl = `${conn.baseUrl}/v1beta/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
-      const res = await postResponse(streamUrl, body(req), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(streamUrl, buildBody(() => body(req), conn.provider), conn.headers, timeout.signal, conn.provider);
       const contentType = res.headers.get('content-type') ?? '';
-      const chunks = contentType.includes('text/event-stream') ? sseLines(res) : singleJsonLine(res);
+      const chunks = contentType.includes('text/event-stream') ? sseLines(res, () => timeout.bump()) : singleJsonLine(res);
       for await (const line of chunks) {
         const parsed = safeParse(line);
         const record = asRecord(parsed);
@@ -157,8 +157,11 @@ function toGoogleContent(m: ChatMessage): Record<string, unknown> {
     };
   }
   if (m.role === 'assistant' && m.toolCalls?.length) {
-    const parts: unknown[] = [];
-    if (typeof m.content === 'string' && m.content) parts.push({ text: m.content });
+    const parts: unknown[] = typeof m.content === 'string'
+      ? (m.content ? [{ text: m.content }] : [])
+      : m.content.map((part) => part.type === 'image'
+          ? { inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
+          : { text: part.text ?? '' });
     for (const call of m.toolCalls) parts.push({ functionCall: { name: call.name, args: call.arguments ?? {} } });
     return { role: 'model', parts };
   }

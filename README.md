@@ -234,7 +234,12 @@ is a copyable implementation of this table.
 - **Core:** message-based contracts (`types.ts`), typed `AIError` + `classify()`,
   timeout/abort merging and SSE/NDJSON readers (`transport.ts`), defensive JSON
   extraction with array support + schema guards (`json.ts`), token estimation with
-  an explicit `estimated` flag (`tokens.ts`).
+  an explicit `estimated` flag (`tokens.ts`). Streams enforce both a total
+  deadline (`Connection.timeoutMs`, default 120s) and an idle deadline
+  (`Connection.idleTimeoutMs`, default 30s, reset on every chunk) so a stalled
+  provider is caught in seconds while a healthy-but-slow stream isn't killed
+  by the total deadline; set `idleTimeoutMs: Infinity` to disable the idle
+  check and rely only on `timeoutMs`.
 - **Adapters:** all four engines with streaming, native tool-calling, JSON modes,
   `finishReason` mapping, buffered-`stream:true` fallback, first-token latency,
   and usage normalization; the full v1 provider profile table. The
@@ -245,6 +250,9 @@ is a copyable implementation of this table.
   `max_completion_tokens` for `maxTokens`; local/OpenAI-compatible profiles keep
   `max_tokens` for compatibility. Google receives `responseSchema` for JSON mode
   only when native tools are absent, avoiding Gemini's JSON-with-tools rejection.
+  Azure OpenAI's `api-version` query parameter defaults to the profile's pinned
+  value but can be overridden per call with `Connection.apiVersion` without
+  waiting on a library release.
 - **Pipeline (`AIHandler`):** policy → keys → `beforeCall` → concurrency/min-interval
   → jittered retry (honoring `Retry-After`) → redacted `CallRecord` telemetry →
   `afterCall`, with `chat`, `stream`, `listModels`, `testConnection`. Every call —
@@ -271,7 +279,10 @@ is a copyable implementation of this table.
   `tool.execute` if you need stricter guarantees), `runAgent()` model↔tool loop
   over the full handler pipeline,
   streamed `AgentEvent`s, budgets (`maxSteps`/`maxTokens`/`deadlineMs`) with honest
-  `stopReason`s, `ApprovalGate` for side-effecting tools (deny is fed back to the
+  `stopReason`s (and an `AgentResult.error` carrying the terminal `AIError` when
+  one is known, so a consumer reading only the final result — not the event
+  stream — can still tell an auth failure from a rate limit from a tool bug),
+  `ApprovalGate` for side-effecting tools (deny is fed back to the
   model as data), and `native` / `promptJson` / `auto` tool modes. `auto` (the
   default) resolves per call from the connection's provider capability profile
   (`profileFor(provider).capabilities.nativeTools`) — hosted providers get
@@ -279,7 +290,9 @@ is a copyable implementation of this table.
   `promptJson`, and an explicit `toolMode` always overrides the default.
   `promptJson` mode accepts a single `{"tool","input"}` directive or a batched
   `{"tools":[…]}` (a bare array works too), so the model can request several
-  tools in one turn just like native tool-calling. Prompt-JSON history is
+  tools in one turn just like native tool-calling; the system prompt includes
+  each tool's input schema, not just its name and description, so the model
+  doesn't have to guess the call shape. Prompt-JSON history is
   serialized as plain text turns, not provider-native tool-call wire format.
 
 ```ts
@@ -290,7 +303,7 @@ import { runAgent, defineTool } from '@jxburros/ai-nugget/agent';
 
 ```bash
 npm install
-npm test            # Vitest contract suite in Node (97 tests; live tests skipped unless env-gated)
+npm test            # Vitest contract suite in Node (live tests skipped unless env-gated)
 npx playwright install chromium   # one-time, before test:browser
 npm run test:browser   # same suite in headless Chromium (proves isomorphism)
 npm run build       # tsc → dist/ (also the typecheck)

@@ -1,5 +1,5 @@
 import { profileFor } from '../adapters/profiles.js';
-import { AIError } from '../errors.js';
+import { AIError, fromUnknown } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import { sleep } from '../util.js';
@@ -25,7 +25,7 @@ async function* run(opts, resolveResult) {
         while (step < maxSteps) {
             step += 1;
             if (agentSignal.signal?.aborted)
-                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
             yield emit(opts, { type: 'step_start', step });
             const calls = [];
             let stepText = '';
@@ -54,7 +54,7 @@ async function* run(opts, resolveResult) {
             // A handler-level failure (auth, policy, cancel, exhausted retries) must
             // stop the loop honestly rather than looking like an empty completion.
             if (streamFailure)
-                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error');
+                return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error', streamFailure);
             finalText = stepText;
             messages.push(toolMode === 'promptJson'
                 ? { role: 'assistant', content: stepText }
@@ -63,7 +63,7 @@ async function* run(opts, resolveResult) {
                 return yield* yieldDone('finished');
             for (const call of calls) {
                 if (agentSignal.signal?.aborted)
-                    return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+                    return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
                 const tool = opts.tools.find((candidate) => candidate.name === call.name);
                 if (!tool) {
                     yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
@@ -82,7 +82,7 @@ async function* run(opts, resolveResult) {
                     }
                     const approval = await opts.approval({ call, tool, step });
                     if (agentSignal.signal?.aborted)
-                        return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled');
+                        return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : 'canceled', abortErrorFrom(agentSignal.signal));
                     if (approval === 'deny') {
                         yield* appendToolDenied(opts, messages, step, call, 'Denied by approval gate');
                         continue;
@@ -115,7 +115,11 @@ async function* run(opts, resolveResult) {
                     continue;
                 }
                 try {
-                    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) });
+                    // JSON.stringify(undefined) returns undefined (it does not throw), which would
+                    // otherwise produce a ChatMessage.content the type forbids and no adapter defends
+                    // against — a tool that legitimately returns nothing must still feed the model
+                    // valid JSON.
+                    messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) ?? 'null' });
                     yield emit(opts, { type: 'tool_result', step, call, result: executed.result, isError: false });
                 }
                 catch (error) {
@@ -131,7 +135,8 @@ async function* run(opts, resolveResult) {
         return yield* yieldDone('max_steps');
     }
     catch (error) {
-        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
+        const caught = fromUnknown(error, opts.connection.provider);
+        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || caught.kind === 'canceled') ? 'canceled' : 'error', caught);
         settled = true;
         resolveResult(result);
         yield emit(opts, { type: 'agent_done', result });
@@ -143,8 +148,8 @@ async function* run(opts, resolveResult) {
             resolveResult(result);
         }
     }
-    function* yieldDone(stopReason) {
-        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason);
+    function* yieldDone(stopReason, error) {
+        const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason, error);
         settled = true;
         resolveResult(result);
         yield emit(opts, { type: 'agent_done', result });
@@ -154,8 +159,11 @@ function emit(opts, event) {
     opts.onEvent?.(event);
     return event;
 }
-function makeResult(finalText, messages, usage, steps, stopReason) {
-    return { finalText, messages, usage, steps, stopReason };
+function makeResult(finalText, messages, usage, steps, stopReason, error) {
+    return { finalText, messages, usage, steps, stopReason, ...(error ? { error } : {}) };
+}
+function abortErrorFrom(signal) {
+    return signal?.reason instanceof AIError ? signal.reason : undefined;
 }
 function* appendToolError(opts, messages, step, call, message) {
     const result = { error: message };
@@ -176,7 +184,7 @@ function withPromptJsonInstruction(messages, tools) {
     return [
         {
             role: 'system',
-            content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
+            content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools:\n${tools.map((tool) => `${tool.name}: ${tool.description}\n  input schema: ${JSON.stringify(tool.parameters)}`).join('\n')}`,
         },
         ...messages.map(toPromptJsonMessage),
     ];

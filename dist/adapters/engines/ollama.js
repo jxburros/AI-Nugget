@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, ndjsonLines, postResponse } from '../../transport.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, buildBody, streamError, streamTimeout } from './base.js';
 export class OllamaAdapter {
     provider;
     constructor(provider) {
@@ -31,8 +31,8 @@ export class OllamaAdapter {
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
-            const res = await postResponse(`${conn.baseUrl}/api/chat`, body(req), conn.headers, timeout.signal, conn.provider);
-            for await (const value of ndjsonLines(res)) {
+            const res = await postResponse(`${conn.baseUrl}/api/chat`, buildBody(() => body(req), conn.provider), conn.headers, timeout.signal, conn.provider);
+            for await (const value of ndjsonLines(res, () => timeout.bump())) {
                 const record = asRecord(value);
                 const message = asRecord(record?.message);
                 const piece = asString(message?.content);
@@ -86,18 +86,29 @@ export class OllamaAdapter {
         });
         const models = Array.isArray(asRecord(data)?.models) ? asRecord(data).models : [];
         const ids = models.map((model) => asString(asRecord(model)?.name) ?? asString(asRecord(model)?.model) ?? '').filter(Boolean);
-        // Probe /api/show per model for context window + capabilities (best effort, sequential
-        // to avoid overwhelming a local Ollama instance).
-        const results = [];
-        for (const id of ids) {
-            const info = { id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } };
-            const probed = await this.showModel(conn, id).catch(() => undefined);
-            if (probed?.contextWindow !== undefined)
-                info.contextWindow = probed.contextWindow;
-            if (probed?.capabilities)
-                info.capabilities = probed.capabilities;
-            results.push(info);
-        }
+        // Probe /api/show per model for context window + capabilities (best effort, bounded
+        // concurrency so a large local library doesn't serialize one round trip per model
+        // while still not overwhelming a local Ollama instance).
+        const results = new Array(ids.length);
+        const concurrency = Math.min(4, ids.length);
+        let next = 0;
+        const worker = async () => {
+            for (;;) {
+                const index = next;
+                next += 1;
+                if (index >= ids.length)
+                    return;
+                const id = ids[index];
+                const info = { id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } };
+                const probed = await this.showModel(conn, id).catch(() => undefined);
+                if (probed?.contextWindow !== undefined)
+                    info.contextWindow = probed.contextWindow;
+                if (probed?.capabilities)
+                    info.capabilities = probed.capabilities;
+                results[index] = info;
+            }
+        };
+        await Promise.all(Array.from({ length: concurrency }, worker));
         return results;
     }
     async showModel(conn, model) {

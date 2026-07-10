@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { postResponse, sseLines } from '../../transport.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { streamError, streamTimeout } from './base.js';
+import { buildBody, streamError, streamTimeout } from './base.js';
 const JSON_MODE_TOOL = 'json_output';
 export class AnthropicAdapter {
     provider;
@@ -35,7 +35,7 @@ export class AnthropicAdapter {
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
-            const res = await postResponse(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
+            const res = await postResponse(`${conn.baseUrl}/v1/messages`, buildBody(() => body(req, jsonMode), conn.provider), conn.headers, timeout.signal, conn.provider);
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
                 const data = await res.json();
@@ -59,7 +59,7 @@ export class AnthropicAdapter {
                 }
             }
             else {
-                for await (const line of sseLines(res)) {
+                for await (const line of sseLines(res, () => timeout.bump())) {
                     const record = asRecord(safeParse(line));
                     if (!record)
                         continue;
@@ -195,11 +195,14 @@ function toAnthropicMessage(m) {
             content: [{ type: 'tool_result', tool_use_id: m.toolCallId ?? '', content: typeof m.content === 'string' ? m.content : '' }],
         };
     }
-    // assistant turns that carried tool calls replay them as tool_use blocks.
+    // assistant turns that carried tool calls replay them as tool_use blocks,
+    // alongside any text/image parts the turn also carried (not just string content).
     if (m.role === 'assistant' && m.toolCalls?.length) {
-        const content = [];
-        if (typeof m.content === 'string' && m.content)
-            content.push({ type: 'text', text: m.content });
+        const content = typeof m.content === 'string'
+            ? (m.content ? [{ type: 'text', text: m.content }] : [])
+            : m.content.map((part) => part.type === 'image'
+                ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
+                : { type: 'text', text: part.text ?? '' });
         for (const call of m.toolCalls)
             content.push({ type: 'tool_use', id: call.id, name: call.name, input: call.arguments ?? {} });
         return { role: 'assistant', content };

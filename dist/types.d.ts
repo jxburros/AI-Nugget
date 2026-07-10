@@ -49,7 +49,11 @@ export interface Connection {
     baseUrl?: string;
     keyRef?: KeyRef;
     timeoutMs?: number;
+    /** Max gap between stream chunks before aborting as `timeout` (default 30s). Set `Infinity` to disable and rely only on `timeoutMs`. */
+    idleTimeoutMs?: number;
     headers?: Record<string, string>;
+    /** Overrides a provider profile's default `{apiVersion}` URL substitution (e.g. Azure OpenAI's `api-version`). */
+    apiVersion?: string;
 }
 export type KeyRef = {
     kind: 'none';

@@ -35,12 +35,17 @@ export function createDefaultRedactor(extraSecrets = []) {
 }
 export class SessionRedactor {
     secrets = new Set();
+    cached;
     addSecret(value) {
-        if (value && value.length >= 6)
+        if (value && value.length >= 6 && !this.secrets.has(value)) {
             this.secrets.add(value);
+            this.cached = undefined;
+        }
     }
     redact(text) {
-        return createDefaultRedactor(this.secrets).redact(text);
+        if (!this.cached)
+            this.cached = createDefaultRedactor(this.secrets);
+        return this.cached.redact(text);
     }
 }
 //# sourceMappingURL=redact.js.map

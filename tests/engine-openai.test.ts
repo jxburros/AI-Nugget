@@ -110,6 +110,21 @@ describe('openaiChat engine contract', () => {
     expect(body.stream_options).toBeUndefined();
   });
 
+  it('builds the azure deployment URL with the profile default api-version (F7)', async () => {
+    const { calls } = mockFetch(sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    await collect(adapterFor('azure-openai').stream(resolved('azure-openai', { baseUrl: 'https://my-resource.openai.azure.com' }), chatReq({ model: 'gpt-4o' })));
+    expect(calls[0]!.url).toBe('https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2024-10-21');
+  });
+
+  it('overrides the azure api-version per connection (F7)', async () => {
+    const { calls } = mockFetch(sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    await collect(adapterFor('azure-openai').stream(
+      resolved('azure-openai', { baseUrl: 'https://my-resource.openai.azure.com', apiVersion: '2025-01-01-preview' }),
+      chatReq({ model: 'gpt-4o' }),
+    ));
+    expect(calls[0]!.url).toBe('https://my-resource.openai.azure.com/openai/deployments/gpt-4o/chat/completions?api-version=2025-01-01-preview');
+  });
+
   it('classifies 401 / 429 / 500 with retryability', async () => {
     for (const [status, kind, retryable] of [[401, 'auth', false], [429, 'rate_limit', true], [500, 'server', true]] as const) {
       mockFetch(textResponse('boom', status));
