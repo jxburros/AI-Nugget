@@ -3,6 +3,120 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-10 - Claude
+
+Addresses the findings (F1–F8) in `docs/reviews/2026-07-09-audit.md` and
+confirms the package is ready for its next npm/GitHub Packages release.
+
+### Changed
+
+- **F1 (confirmed bug): a tool returning `undefined` no longer kills the agent
+  run.** `src/agent/loop.ts` pushed `JSON.stringify(executed.result)` as a
+  `ChatMessage.content` straight into history; `JSON.stringify(undefined)` is
+  `undefined`, not a throw, so a void-returning tool produced an invalid
+  message and crashed the next step's request-body mapping. Now falls back to
+  the JSON literal `'null'`.
+- **F2: deterministic request-build failures are no longer retried as
+  `network`.** All four engines built their wire body inside the same
+  `try`/`catch` that classifies transport failures, so a synchronous bug in
+  that step (exactly what F1 produced) was misclassified as retryable
+  `network` and burned every retry attempt. Added `buildBody()`
+  (`engines/base.ts`) so a body-construction throw becomes a non-retryable
+  `invalid_request` before it ever reaches `fromUnknown`. Surfaced (and
+  fixed) a related latent bug while adding the regression test: `promptChars`
+  / `textFromMessages` (`util.ts`) assumed `ChatMessage.content` was always
+  `string | ContentPart[]` and threw on anything else, which meant a
+  malformed message could crash telemetry recording on the way to reporting
+  the (now correctly classified) failure. Both now treat unrecognized content
+  shapes as empty instead of throwing.
+- **F3: streams no longer die mid-answer on a total deadline alone.**
+  `withTimeout` (`transport.ts`) now arms an optional idle deadline alongside
+  the total one; `bump()` re-arms it, called from `textLines`/`sseLines`/
+  `ndjsonLines` on every chunk read from the wire. `streamTimeout`
+  (`engines/base.ts`) enables it by default at 30s, configurable per call via
+  a new `Connection.idleTimeoutMs` (set `Infinity` to disable and keep only
+  the existing `timeoutMs` total deadline). A stalled provider is now caught
+  in seconds; a healthy-but-slow stream is no longer bounded by the total
+  deadline.
+- **F4: `AgentResult` now carries the terminal error.** Added
+  `AgentResult.error?: AIError`, populated from the handler-level
+  `StreamEvent.error`, the agent loop's own catch block (via `fromUnknown`),
+  and abort reasons that are already a typed `AIError` (e.g. a `deadlineMs`
+  budget). A consumer reading only `agent.result` — not the event stream —
+  can now tell an auth failure from a rate limit from an agent-loop bug.
+- **F5: `promptJson` mode now tells the model each tool's input schema**, not
+  just its name and description — previously the model had to guess the
+  `input` shape, `validateToolArgs` rejected the guess, and the loop spent a
+  step on a correction round-trip it didn't need to.
+- **F6: assistant turns with array content no longer lose their parts on
+  replay when the turn also carried tool calls.** `anthropic.ts` and
+  `google.ts` only forwarded `content` on the tool-calling branch when it was
+  a plain string; a `ContentPart[]` turn (text + image parts alongside tool
+  calls) silently dropped everything but the tool calls. Both now map
+  `ContentPart[]` the same way the non-tool-calling branch already did.
+- **F7: Azure OpenAI's `api-version` is no longer frozen in the URL
+  template.** Moved the pinned value to `quirks.azureApiVersion` on the
+  `azure-openai` profile and added a `{apiVersion}` substitution plus a new
+  `Connection.apiVersion` override, so a caller can move to a newer Azure API
+  version without waiting on a library release.
+- **F8 (minor/cosmetic):** `SessionRedactor` now caches its built redactor
+  and only rebuilds on a genuinely new secret, instead of rebuilding on every
+  `redact()` call; `OllamaAdapter.listModels()` now probes `/api/show` with
+  bounded concurrency (4) instead of one model at a time; the README's
+  `npm test` comment no longer hardcodes a test count that was already stale;
+  `promptChars` gained a comment documenting that counting base64 image bytes
+  is intentional, not a bug.
+- Documented the new `Connection.idleTimeoutMs`/`Connection.apiVersion`
+  fields, `AgentResult.error`, and the promptJson schema inclusion in
+  `README.md`'s "What's implemented" section.
+
+### Deploy readiness (npm + GitHub Packages)
+
+- Verified, did not change: `package.json` (`@jxburros/ai-nugget`, scope
+  matches the `jxburros` GitHub owner, `exports`/`files`/`engines` correct)
+  and `.github/workflows/publish.yml` (validates the release tag matches
+  `package.json`'s version, then publishes to both `registry.npmjs.org` and
+  `npm.pkg.github.com`) were already correctly configured for a dual-registry
+  release. `npm pack --dry-run` produces a clean 70-file tarball (`dist/`,
+  `nugget/`, `README.md`, `LICENSE`). `npm view @jxburros/ai-nugget versions`
+  shows only `0.3.1` is published — `0.4.0` (current `package.json` version,
+  now carrying this pass's fixes) has never been released, so no version
+  bump was needed; a maintainer can cut a `v0.4.0` GitHub release directly.
+  Did not create a release or publish — that requires the maintainer's
+  `NPM_TOKEN` secret and an explicit go-ahead, not something to trigger
+  unilaterally.
+
+### Not completed
+
+- The prior audit's still-open items (lint/format tooling, coverage
+  thresholds, Dependabot, `examples/npm-mini-apps` lockfiles/pinning) are
+  unchanged — they're process/tooling decisions out of scope for a
+  findings-fix pass, same reasoning as the 2026-07-09 entry below.
+- The audit's "Improvement ideas" (I1–I8: typed structured output,
+  `providerOptions` passthrough, reasoning-event passthrough, cost
+  accounting, embeddings, additional provider rows, parallel tool execution,
+  prompt-caching usage fields) are explicitly marked "nothing here is
+  broken" in the audit — new capability, not findings. Left for a maintainer
+  to scope and opt into deliberately.
+
+### Notes
+
+- Added regression tests for every finding: F1 (`tests/agent.test.ts`, tool
+  returning `undefined`), F2 (`tests/handler-pipeline.test.ts`, deterministic
+  build failure classification + no retry), F3 (`tests/transport.test.ts`,
+  idle-timeout firing and `bump()` reset), F4 (`tests/agent.test.ts`,
+  `AgentResult.error` on a failed model call), F5 (`tests/agent.test.ts`,
+  schema present in the promptJson system prompt), F6
+  (`tests/engine-anthropic.test.ts`, `tests/engine-google.test.ts`, array
+  content preserved alongside tool calls), F7 (`tests/engine-openai.test.ts`,
+  default and overridden Azure `api-version`).
+- Validation: `npm ci`, `npm test` (120 passed, 6 live-gated skipped, up from
+  109), `npm run test:browser` (120 passed, headless Chromium), `npm run
+  typecheck`, `npm run build`, `npm run build:nugget` (`dist/`/`nugget/`
+  regenerated and committed), `npm audit` (0 vulnerabilities), `npm pack
+  --dry-run` (clean tarball). Live smoke tests not run (no provider
+  credentials in this environment).
+
 ## 2026-07-09 - Claude
 
 ### Changed

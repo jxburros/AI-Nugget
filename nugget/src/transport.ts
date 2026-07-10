@@ -1,9 +1,16 @@
 import { AIError, classify, fromUnknown } from './errors.js';
 
-export function withTimeout(ms: number, external?: AbortSignal): {
+/**
+ * `ms` is a total deadline for the whole call. `idleMs`, when given, is a
+ * second, independently-armed deadline that `bump()` re-arms on every chunk
+ * of data received — it catches a stalled provider in `idleMs`, while a
+ * healthy stream that simply runs long is only bounded by `ms`.
+ */
+export function withTimeout(ms: number, external?: AbortSignal, idleMs?: number): {
   signal: AbortSignal;
   done(): void;
   timedOut(): boolean;
+  bump(): void;
 } {
   const controller = new AbortController();
   let didTimeOut = false;
@@ -11,6 +18,16 @@ export function withTimeout(ms: number, external?: AbortSignal): {
     didTimeOut = true;
     controller.abort(new AIError(`Request timed out after ${ms}ms`, { kind: 'timeout' }));
   }, ms);
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = () => {
+    if (idleMs === undefined || !Number.isFinite(idleMs)) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      didTimeOut = true;
+      controller.abort(new AIError(`Request idle for ${idleMs}ms with no data received`, { kind: 'timeout' }));
+    }, idleMs);
+  };
+  armIdle();
   const onAbort = () => controller.abort(external?.reason);
   if (external) {
     if (external.aborted) onAbort();
@@ -20,10 +37,14 @@ export function withTimeout(ms: number, external?: AbortSignal): {
     signal: controller.signal,
     done() {
       clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
       external?.removeEventListener('abort', onAbort);
     },
     timedOut() {
       return didTimeOut;
+    },
+    bump() {
+      armIdle();
     },
   };
 }
@@ -83,8 +104,8 @@ export async function postResponse(
   return res;
 }
 
-export async function* sseLines(res: Response): AsyncIterable<string> {
-  for await (const line of textLines(res)) {
+export async function* sseLines(res: Response, onChunk?: () => void): AsyncIterable<string> {
+  for await (const line of textLines(res, onChunk)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith(':')) continue;
     if (!trimmed.startsWith('data:')) continue;
@@ -94,8 +115,8 @@ export async function* sseLines(res: Response): AsyncIterable<string> {
   }
 }
 
-export async function* ndjsonLines(res: Response): AsyncIterable<unknown> {
-  for await (const line of textLines(res)) {
+export async function* ndjsonLines(res: Response, onChunk?: () => void): AsyncIterable<unknown> {
+  for await (const line of textLines(res, onChunk)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
@@ -106,7 +127,8 @@ export async function* ndjsonLines(res: Response): AsyncIterable<unknown> {
   }
 }
 
-export async function* textLines(res: Response): AsyncIterable<string> {
+/** `onChunk`, when given, fires after every chunk of bytes read from the wire — used to bump an idle timeout. */
+export async function* textLines(res: Response, onChunk?: () => void): AsyncIterable<string> {
   if (!res.body) {
     const raw = await res.text().catch(() => '');
     for (const line of raw.split(/\r?\n/)) yield line;
@@ -123,6 +145,7 @@ export async function* textLines(res: Response): AsyncIterable<string> {
         completed = true;
         break;
       }
+      onChunk?.();
       buffer += decoder.decode(value, { stream: true });
       let newlineIndex: number;
       while ((newlineIndex = buffer.indexOf('\n')) >= 0) {

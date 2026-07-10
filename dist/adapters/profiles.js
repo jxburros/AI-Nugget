@@ -13,7 +13,7 @@ export const PROVIDER_PROFILES = {
         engine: 'openaiChat',
         auth: 'api-key-header',
         capabilities: HOSTED_CLOUD,
-        quirks: { urlTemplate: '{baseUrl}/openai/deployments/{model}/chat/completions?api-version=2024-10-21', maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true },
+        quirks: { urlTemplate: '{baseUrl}/openai/deployments/{model}/chat/completions?api-version={apiVersion}', maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, azureApiVersion: '2024-10-21' },
     },
     openrouter: {
         engine: 'openaiChat',

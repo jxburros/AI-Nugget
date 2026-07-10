@@ -120,6 +120,25 @@ describe('anthropic engine contract', () => {
     expect(toolTurns[0].content.map((p: any) => p.tool_use_id)).toEqual(['toolu_1', 'toolu_2']);
   });
 
+  it('preserves array content (text/image parts) on an assistant turn that also carried tool calls (F6)', async () => {
+    const { calls } = mockFetch(sseResponse([{ type: 'message_stop' }]));
+    await collect(anthropic().stream(conn(), chatReq({
+      messages: [
+        { role: 'user', content: 'weather?' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'checking now' }, { type: 'image', imageBase64: 'abc123', mimeType: 'image/png' }],
+          toolCalls: [{ id: 'toolu_1', name: 'get_weather', arguments: { city: 'NYC' } }],
+        },
+      ],
+    })));
+    const body = calls[0]!.body as Record<string, any>;
+    const assistant = body.messages.find((m: any) => m.role === 'assistant');
+    expect(assistant.content[0]).toEqual({ type: 'text', text: 'checking now' });
+    expect(assistant.content[1]).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'abc123' } });
+    expect(assistant.content[2]).toEqual({ type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: { city: 'NYC' } });
+  });
+
   it('handles a buffered (non-SSE) response body', async () => {
     mockFetch(jsonResponse({ content: [{ type: 'text', text: 'buffered' }], usage: { input_tokens: 2, output_tokens: 1 }, stop_reason: 'end_turn' }));
     const events = await collect(anthropic().stream(conn(), chatReq()));

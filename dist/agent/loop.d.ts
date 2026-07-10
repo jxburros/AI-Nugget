@@ -1,3 +1,4 @@
+import { AIError } from '../errors.js';
 import type { AIHandler } from '../handler.js';
 import type { ChatMessage, Connection, StreamEvent, ToolCall, Usage } from '../types.js';
 import type { ToolSpec } from './tools.js';
@@ -63,6 +64,8 @@ export interface AgentResult {
     usage: Usage;
     steps: number;
     stopReason: 'finished' | 'max_steps' | 'budget' | 'deadline' | 'canceled' | 'error';
+    /** The terminal AIError, when the run ended abnormally and one is known. */
+    error?: AIError;
 }
 export declare function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & {
     result: Promise<AgentResult>;

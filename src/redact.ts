@@ -37,12 +37,17 @@ export function createDefaultRedactor(extraSecrets: Iterable<string> = []): Reda
 
 export class SessionRedactor implements Redactor {
   private secrets = new Set<string>();
+  private cached?: Redactor;
 
   addSecret(value: string | null | undefined): void {
-    if (value && value.length >= 6) this.secrets.add(value);
+    if (value && value.length >= 6 && !this.secrets.has(value)) {
+      this.secrets.add(value);
+      this.cached = undefined;
+    }
   }
 
   redact(text: string): string {
-    return createDefaultRedactor(this.secrets).redact(text);
+    if (!this.cached) this.cached = createDefaultRedactor(this.secrets);
+    return this.cached.redact(text);
   }
 }

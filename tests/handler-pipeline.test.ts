@@ -149,6 +149,18 @@ describe('AIHandler pipeline', () => {
     expect(records[0]?.finishReason).toBe('error');
   });
 
+  it('classifies a deterministic request-build failure as invalid_request and never retries it (F2)', async () => {
+    const spy = vi.spyOn(globalThis, 'fetch');
+    const handler = new AIHandler({ keySource: memoryKeySource({}), retry: { maxAttempts: 3, baseDelayMs: 1, maxDelayMs: 1 } });
+    const badMessages = [{ role: 'user', content: undefined }] as unknown as ChatRequest['messages'];
+    const events = await collect(handler.stream(openaiConn(), { ...req, messages: badMessages }));
+    const last = events.at(-1) as any;
+    expect(last.type).toBe('error');
+    expect(last.error.kind).toBe('invalid_request');
+    expect(last.error.retryable).toBe(false);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it('removes aborted queued waiters so later calls are not stranded', async () => {
     const first = new AbortController();
     const second = new AbortController();

@@ -1,11 +1,29 @@
 import { AIError, classify, fromUnknown } from './errors.js';
-export function withTimeout(ms, external) {
+/**
+ * `ms` is a total deadline for the whole call. `idleMs`, when given, is a
+ * second, independently-armed deadline that `bump()` re-arms on every chunk
+ * of data received — it catches a stalled provider in `idleMs`, while a
+ * healthy stream that simply runs long is only bounded by `ms`.
+ */
+export function withTimeout(ms, external, idleMs) {
     const controller = new AbortController();
     let didTimeOut = false;
     const timer = setTimeout(() => {
         didTimeOut = true;
         controller.abort(new AIError(`Request timed out after ${ms}ms`, { kind: 'timeout' }));
     }, ms);
+    let idleTimer;
+    const armIdle = () => {
+        if (idleMs === undefined || !Number.isFinite(idleMs))
+            return;
+        if (idleTimer)
+            clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => {
+            didTimeOut = true;
+            controller.abort(new AIError(`Request idle for ${idleMs}ms with no data received`, { kind: 'timeout' }));
+        }, idleMs);
+    };
+    armIdle();
     const onAbort = () => controller.abort(external?.reason);
     if (external) {
         if (external.aborted)
@@ -17,10 +35,15 @@ export function withTimeout(ms, external) {
         signal: controller.signal,
         done() {
             clearTimeout(timer);
+            if (idleTimer)
+                clearTimeout(idleTimer);
             external?.removeEventListener('abort', onAbort);
         },
         timedOut() {
             return didTimeOut;
+        },
+        bump() {
+            armIdle();
         },
     };
 }
@@ -72,8 +95,8 @@ export async function postResponse(url, body, headers, signal, provider) {
     }
     return res;
 }
-export async function* sseLines(res) {
-    for await (const line of textLines(res)) {
+export async function* sseLines(res, onChunk) {
+    for await (const line of textLines(res, onChunk)) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith(':'))
             continue;
@@ -85,8 +108,8 @@ export async function* sseLines(res) {
         yield data;
     }
 }
-export async function* ndjsonLines(res) {
-    for await (const line of textLines(res)) {
+export async function* ndjsonLines(res, onChunk) {
+    for await (const line of textLines(res, onChunk)) {
         const trimmed = line.trim();
         if (!trimmed)
             continue;
@@ -98,7 +121,8 @@ export async function* ndjsonLines(res) {
         }
     }
 }
-export async function* textLines(res) {
+/** `onChunk`, when given, fires after every chunk of bytes read from the wire — used to bump an idle timeout. */
+export async function* textLines(res, onChunk) {
     if (!res.body) {
         const raw = await res.text().catch(() => '');
         for (const line of raw.split(/\r?\n/))
@@ -116,6 +140,7 @@ export async function* textLines(res) {
                 completed = true;
                 break;
             }
+            onChunk?.();
             buffer += decoder.decode(value, { stream: true });
             let newlineIndex;
             while ((newlineIndex = buffer.indexOf('\n')) >= 0) {

@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { postResponse, sseLines } from '../../transport.js';
 import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { health, listOpenModels, streamError, streamTimeout } from './base.js';
+import { buildBody, health, listOpenModels, streamError, streamTimeout } from './base.js';
 export class OpenAIChatAdapter {
     profile;
     provider;
@@ -34,7 +34,7 @@ export class OpenAIChatAdapter {
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
-            const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+            const res = await postResponse(urlFor(conn, this.profile, req.model), buildBody(() => openAiBody(req, this.profile), conn.provider), conn.headers, timeout.signal, conn.provider);
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
                 // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -54,7 +54,7 @@ export class OpenAIChatAdapter {
             }
             else {
                 const partialTools = new Map();
-                for await (const line of sseLines(res)) {
+                for await (const line of sseLines(res, () => timeout.bump())) {
                     const chunk = safeParse(line);
                     const record = asRecord(chunk);
                     if (!record)
@@ -159,7 +159,11 @@ function toOpenAiMessage(message) {
 }
 function urlFor(conn, profile, model) {
     if (profile.quirks?.urlTemplate) {
-        return profile.quirks.urlTemplate.replace('{baseUrl}', conn.baseUrl).replace('{model}', encodeURIComponent(model));
+        const apiVersion = conn.apiVersion ?? profile.quirks.azureApiVersion ?? '';
+        return profile.quirks.urlTemplate
+            .replace('{baseUrl}', conn.baseUrl)
+            .replace('{model}', encodeURIComponent(model))
+            .replace('{apiVersion}', encodeURIComponent(apiVersion));
     }
     return `${conn.baseUrl}/chat/completions`;
 }

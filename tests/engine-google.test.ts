@@ -87,6 +87,26 @@ describe('google engine contract', () => {
     expect(functionResponseTurns[0].parts.map((p: any) => p.functionResponse.name)).toEqual(['get_weather', 'get_time']);
   });
 
+  it('preserves array content (text/image parts) on a model turn that also carried function calls (F6)', async () => {
+    const { calls } = mockFetch(sseResponse([{ candidates: [{ content: { parts: [{ text: 'ok' }] }, finishReason: 'STOP' }] }]));
+    await collect(google().stream(conn(), chatReq({
+      messages: [
+        { role: 'user', content: 'weather?' },
+        {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'checking now' }, { type: 'image', imageBase64: 'abc123', mimeType: 'image/png' }],
+          toolCalls: [{ id: 'c1', name: 'get_weather', arguments: { city: 'NYC' } }],
+        },
+      ],
+      tools: [{ name: 'get_weather', description: 'w', parameters: { type: 'object' } }],
+    })));
+    const body = calls[0]!.body as Record<string, any>;
+    const modelTurn = body.contents.find((c: any) => c.role === 'model');
+    expect(modelTurn.parts[0]).toEqual({ text: 'checking now' });
+    expect(modelTurn.parts[1]).toEqual({ inlineData: { mimeType: 'image/png', data: 'abc123' } });
+    expect(modelTurn.parts[2]).toEqual({ functionCall: { name: 'get_weather', args: { city: 'NYC' } } });
+  });
+
   it('maps prompt-level safety blocks without candidates to content_filter', async () => {
     mockFetch(sseResponse([{ promptFeedback: { blockReason: 'SAFETY' } }]));
     const events = await collect(google().stream(conn(), chatReq()));

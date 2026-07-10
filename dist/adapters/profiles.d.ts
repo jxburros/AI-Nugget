@@ -32,6 +32,8 @@ export interface ProviderProfile {
         maxTokensRequired?: boolean;
         maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
         supportsJsonSchema?: boolean;
+        /** Default `{apiVersion}` substitution for `urlTemplate`; overridable per-call via `Connection.apiVersion`. */
+        azureApiVersion?: string;
     };
     listModelsPath?: string;
     healthPath?: string;
