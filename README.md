@@ -58,6 +58,13 @@ with a `baseUrl` resolve to the `openai-compat` escape hatch. **Grok/xAI is not
 blocked and is never officially integrated** — point `openai-compat` at any
 endpoint if you must; that is your configuration, not a supported profile.
 
+**Wire URL for `openai-compat` and the other local runtimes.** `openai-compat`,
+`lmstudio`, `llamacpp`, and `vllm` have no `urlTemplate` in the profile table,
+so the `openaiChat` engine falls back to `POST {baseUrl}/chat/completions`
+(no `/v1` prefix — include it in `baseUrl` yourself if your server needs it,
+e.g. `http://localhost:8080/v1`). This matters most when standing up a local
+mock or test server: it has to listen on that exact path.
+
 Model identity is always `(source, model)` — `modelRef(source, model)` gives the
 canonical `provider/model` key so the same weights served by different hosts stay
 distinct and comparable.

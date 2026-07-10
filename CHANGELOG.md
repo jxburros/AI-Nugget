@@ -3,6 +3,33 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-07-10 - Claude
+
+### Changed
+
+- README: documented that `openai-compat`, `lmstudio`, `llamacpp`, and `vllm`
+  have no `urlTemplate` and fall back to `POST {baseUrl}/chat/completions`.
+  Previously only discoverable by reading `adapters/profiles.ts` +
+  `adapters/engines/openaiChat.ts`; came up building a local mock provider for
+  a downstream app (`Test-App`/Nugget Bench).
+- `build-agent-loop` skill: added a "`promptJson` wire contract" section
+  documenting the exact system-prompt text, accepted JSON reply shapes, and
+  the `Tool <name> returned: ...` synthetic tool-result turn format, for
+  anyone scripting a fixture/test double/local model rather than relying on a
+  real model to infer the format from the prompt.
+- Version bumped to 0.4.1 (docs-only; no runtime behavior changed).
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm test` (Node contract suite), `npm run test:browser`,
+  `npm run build`, `npm run build:nugget` (drift check), all pass on
+  Node 22.22.2. Doc-only change; no test updates required per CLAUDE.md
+  (transport/parsing/retries/policy/redaction/agent-loop behavior unchanged).
+
 ## 2026-07-09 - Claude
 
 ### Changed
