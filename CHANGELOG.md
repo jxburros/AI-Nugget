@@ -3,7 +3,26 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
-## 2026-07-10 - Claude
+## 2026-07-11 - Claude
+
+### Changed
+- `src/adapters/engines/openaiChat.ts`: `makeResult` now labels usage `estimated:false` only when
+  **both** `inputTokens` and `outputTokens` are present. Previously a partial usage response (one
+  field present, the other `undefined`) was reported as an exact accounting; it now falls back to
+  the estimator, so `usage.estimated` truthfully reflects whether the counts are authoritative.
+- Regenerated `dist/` and the vendored `nugget/` build so the committed artifacts match `src/`.
+
+### Not completed
+- None for the fix above. Findings surfaced by the same audit but intentionally deferred (documented
+  in the AI Server Studio audit report `docs/audit-2026-07-11.md`): `errors.ts` classifying every
+  403 as non-retryable (kept — retrying genuine 403s risks storms; the safer default), the declared
+  provider quirks `keyOptional`/`modelOptional`/`maxTokensRequired` in `profiles.ts` being unread,
+  the unreachable `role==='tool'` branch in `anthropic.ts`, and `agent/loop.ts` promptJson mode
+  dropping image content parts. These need dedicated design/test work, not an audit-time patch.
+
+### Notes
+- Validation: `npm test` → 109 passed / 6 skipped (unchanged from baseline). `npm run build` and
+  `npm run build:nugget` clean.
 
 ### Changed
 

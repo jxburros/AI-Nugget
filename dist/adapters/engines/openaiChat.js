@@ -184,7 +184,10 @@ function parseOpenAiResponse(raw) {
     };
 }
 function makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens) {
-    const usage = inputTokens !== undefined || outputTokens !== undefined
+    // Only label usage exact (estimated:false) when BOTH token counts came back from the provider.
+    // A partial response (one field present, the other undefined) is not an exact accounting, so fall
+    // back to the estimator rather than reporting a half-filled usage object as authoritative.
+    const usage = inputTokens !== undefined && outputTokens !== undefined
         ? { inputTokens, outputTokens, estimated: false }
         : estimatedUsage(textFromMessages(req.messages), text);
     return {

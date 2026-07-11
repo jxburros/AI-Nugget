@@ -181,7 +181,10 @@ function parseOpenAiResponse(raw: unknown): { text: string; toolCalls: ToolCall[
 }
 
 function makeResult(conn: ResolvedConnection, req: ChatRequest, text: string, toolCalls: ToolCall[], finish: string | undefined, started: number, firstTokenMs: number | null, inputTokens?: number, outputTokens?: number): ChatResult {
-  const usage = inputTokens !== undefined || outputTokens !== undefined
+  // Only label usage exact (estimated:false) when BOTH token counts came back from the provider.
+  // A partial response (one field present, the other undefined) is not an exact accounting, so fall
+  // back to the estimator rather than reporting a half-filled usage object as authoritative.
+  const usage = inputTokens !== undefined && outputTokens !== undefined
     ? { inputTokens, outputTokens, estimated: false }
     : estimatedUsage(textFromMessages(req.messages), text);
   return {
