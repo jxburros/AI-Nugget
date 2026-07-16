@@ -1,0 +1,60 @@
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build readable project page
+        env:
+          PAGE_SOURCE: README.md
+        run: |
+          mkdir -p _site
+          node <<'NODE'
+          const fs = require('fs');
+          const source = process.env.PAGE_SOURCE;
+          const fallback = fs.existsSync('README.md') ? 'README.md' : '';
+          const selected = fs.existsSync(source) ? source : fallback;
+          const body = selected ? fs.readFileSync(selected, 'utf8') : 'No project documentation is available yet.';
+          const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const title = process.env.GITHUB_REPOSITORY?.split('/').pop() || 'Project';
+          const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><style>body{margin:0;background:#0b1020;color:#e8edf7;font:16px/1.6 system-ui,sans-serif}main{max-width:980px;margin:auto;padding:32px 20px 64px}header{display:flex;justify-content:space-between;gap:16px;align-items:center;border-bottom:1px solid #34405a;padding-bottom:18px;margin-bottom:24px}h1{margin:0;font-size:clamp(1.6rem,4vw,2.5rem)}a{color:#7dd3fc}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#111a2e;border:1px solid #34405a;border-radius:14px;padding:24px;font:14px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}</style></head><body><main><header><h1>${esc(title)}</h1><a href="https://github.com/${process.env.GITHUB_REPOSITORY}">View repository</a></header><pre>${esc(body)}</pre></main></body></html>`;
+          fs.writeFileSync('_site/index.html', html);
+          fs.writeFileSync('_site/404.html', html);
+          fs.writeFileSync('_site/.nojekyll', '');
+          NODE
+
+      - uses: actions/configure-pages@v6
+        with:
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+          include-hidden-files: true
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
