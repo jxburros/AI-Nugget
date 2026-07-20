@@ -3,6 +3,14 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## Unreleased
+
+### Changed
+
+- Added repo-specific QA instructions covering the required Node and browser
+  contract suites, generated-artifact drift checks, security invariants, and
+  honest skip conditions for optional live-provider checks.
+
 ## 2026-07-10 - Claude
 
 ### Changed
