@@ -11,6 +11,26 @@ phased build in `development-plan.md`; entries note which phase they advance.
   contract suites, generated-artifact drift checks, security invariants, and
   honest skip conditions for optional live-provider checks.
 
+## 2026-08-09 - Claude
+
+### Changed
+
+- Added `docs/reviews/2026-08-09-persona-review.md`: a hands-on review of
+  0.5.0 read as an auditing engineer, then re-run through five developer
+  personas (beginner, junior dev on a deadline, staff engineer evaluating
+  adoption, solo founder on local models, agent/tools engineer), with a
+  side-by-side comparison and a prioritized, non-breaking fix list.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: docs-only change; `npm test`, `npm run build`, and
+  `npm run lint` were run beforehand (against a clean `npm install`) to
+  ground the review's claims and were not affected by this addition.
+
 ## 2026-08-09 - Claude — 0.5.0
 
 Implements the AI Server Studio friction report's remediations. Numbers in
