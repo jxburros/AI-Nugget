@@ -5,6 +5,13 @@
 **Author:** Claude
 **Nugget version in the field:** `@jxburros/ai-nugget@^0.3.1` (consumer pin) · latest published `0.4.1`
 
+> **Status update (2026-08-09):** all 24 library-side suggestions plus the
+> library half of #26 were implemented in **0.5.0** (additive, backward-compatible).
+> See `UPGRADING.md` and the `0.5.0` `CHANGELOG.md` entry, which reference these
+> same numbers. Deferred (need a published release): the AI Server Studio
+> dependency bump and its adoption of `prewarm()`/`pricing` (#3, #24, #26
+> consumer halves).
+
 ---
 
 ## TL;DR (verdict)
