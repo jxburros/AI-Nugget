@@ -11,6 +11,30 @@ phased build in `development-plan.md`; entries note which phase they advance.
   contract suites, generated-artifact drift checks, security invariants, and
   honest skip conditions for optional live-provider checks.
 
+## 2026-08-09 - Claude
+
+### Changed
+
+- Added `docs/reviews/2026-08-09-ai-server-studio-friction-report.md` — a
+  production friction report drawn from the AI Server Studio consumer. It
+  catalogues 24 evidence-backed frictions (file/line + dates, cross-checked
+  against `src/` at 0.4.1) and proposes 26 numbered, independently-pickable
+  remediations. Documents the root-cause chain (no provider-options passthrough
+  → local `fetch` bypass → in-repo agent loop → lost telemetry/blocklist) and
+  the widest gap (no `embed()` support, so the consumer's entire RAG path
+  bypasses the handler). No source changes in this entry (report only).
+
+### Not completed
+
+- None (report only; the findings themselves are documented, not fixed).
+
+### Notes
+
+- Validation: documentation-only change; no test updates required per CLAUDE.md
+  (transport/parsing/retries/policy/redaction/agent-loop behavior unchanged).
+  A companion visual report with identical suggestion numbers was produced as a
+  shareable artifact.
+
 ## 2026-07-10 - Claude
 
 ### Changed
