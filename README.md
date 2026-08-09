@@ -15,8 +15,25 @@ The package is MIT licensed.
 
 See `design.md` for the full contract. The original evidence base, phased
 build/adoption plan, and dev handoff are archived under `docs/archive/`.
+New in 0.5.0 — see [`UPGRADING.md`](./UPGRADING.md) for the full, numbered list
+of additions (all backward-compatible): `providerOptions` passthrough, typed
+`chatParsed`, `embed()`, `reasoning` stream events, idle-stream timeout, a cost
+hook, a CommonJS `require` entry point, and more.
 
 ## Install / use
+
+The package ships **both ESM and CommonJS** entry points, so it works under
+`import` and `require` alike:
+
+```ts
+// ESM
+import { AIHandler, envKeySource } from '@jxburros/ai-nugget';
+```
+
+```js
+// CommonJS
+const { AIHandler, envKeySource } = require('@jxburros/ai-nugget');
+```
 
 ```ts
 import { AIHandler, envKeySource } from '@jxburros/ai-nugget';
@@ -48,7 +65,7 @@ an OpenAI-compatible provider is a table row, not another copy of the SSE loop.
 
 | Engine | Providers | Streaming | Tools | JSON mode |
 |---|---|---|---|---|
-| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
+| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `cohere`, `perplexity`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
 | `anthropic` | `anthropic` | SSE (`content_block_delta`) | `tool_use` blocks (streamed) | forced-tool JSON mode |
 | `google` | `google` | SSE (`streamGenerateContent`) | `functionDeclarations` | `responseMimeType` |
 | `ollama` | `ollama` | NDJSON | native `tools` | `format: json` |
@@ -86,7 +103,8 @@ interface ProviderCapabilities {
 ```
 
 Hosted cloud providers (`openai`, `azure-openai`, `openrouter`, `groq`,
-`deepseek`, `mistral`, `together`, `fireworks`, `anthropic`, `google`) ship
+`deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`,
+`cohere`, `perplexity`, `anthropic`, `google`) ship
 `{ nativeTools: true, jsonMode: true, local: false, embeddable: false }`. Local
 runtimes (`lmstudio`, `llamacpp`, `vllm`, and the `openai-compat` escape hatch)
 ship the conservative `{ nativeTools: false, jsonMode: false, local: true,
@@ -107,17 +125,16 @@ matters most for OpenRouter, Ollama, LM Studio, vLLM, and any
 profile table. A caller that knows its model better should pass an explicit
 `toolMode` (agent layer) rather than rely on the capability default.
 
-**`listModels()` is optional per adapter — two engines never return anything.**
-`ProviderAdapter.listModels` is `?`-optional, and `AIHandler.listModels()`
-falls back to `[]` when an adapter doesn't implement it. Concretely: the
-`openaiChat` and `ollama` engines implement it (`GET /models` /
-`GET /api/tags`); the `anthropic` and `google` engines currently don't, so
-`handler.listModels()` for those providers always resolves to `[]`, not an
-error. This is easy to miss because `capabilities` doesn't surface it — an
-app building a model picker on top of `listModels()` should treat an empty
-result as "this provider doesn't support discovery," not "this provider has
-no models," and have a fallback (e.g. an app-configured default model per
-connection) ready for `anthropic`/`google` rather than showing an empty list.
+**`listModels()` is optional per adapter, but all four engines now implement
+it.** `ProviderAdapter.listModels` is `?`-optional, and `AIHandler.listModels()`
+falls back to `[]` when an adapter doesn't implement it. All four engines
+implement it against the provider's real endpoint: `openaiChat` (`GET /models`),
+`ollama` (`GET /api/tags` + bounded-concurrency `/api/show` probes for context
+window/capabilities), `anthropic` (`GET /v1/models`), and `google`
+(`GET /v1beta/models`, mapping `inputTokenLimit` → `contextWindow`). A provider
+with no listing endpoint (e.g. `perplexity`) still resolves to `[]` rather than
+erroring, so a model picker built on `listModels()` should treat an empty result
+as "no discovery here," not "no models," and keep an app-configured default ready.
 
 ### Letting an app's users pick a model (best practice)
 
@@ -297,7 +314,7 @@ import { runAgent, defineTool } from '@jxburros/ai-nugget/agent';
 
 ```bash
 npm install
-npm test            # Vitest contract suite in Node (97 tests; live tests skipped unless env-gated)
+npm test            # Vitest contract suite in Node (live tests skipped unless env-gated)
 npx playwright install chromium   # one-time, before test:browser
 npm run test:browser   # same suite in headless Chromium (proves isomorphism)
 npm run build       # tsc → dist/ (also the typecheck)
@@ -371,11 +388,13 @@ Three supported paths, in order of preference:
    (GitHub Packages requires an authenticated token even for public-repo
    packages.) Then `npm install @jxburros/ai-nugget@^0.3.1`.
 3. **Vendored `nugget/` (fallback).** `nugget/` is a generated single-folder
-   build (`src/` + `VERSION.txt` with a version + content-hash stamp) for repos
-   that cannot take a package dependency. Copy it in; `VERSION.txt` makes drift
-   from the source of truth detectable. (Bundlers that don't resolve
-   `.ts`+`.js`-suffixed imports the way `tsc` does — e.g. Turbopack — should
-   vendor `dist/` instead; see below.)
+   build for repos that cannot take a package dependency. It now contains **both**
+   `nugget/src/` (TypeScript source) **and** `nugget/dist/` (compiled ESM `.js` +
+   `.d.ts`), plus `VERSION.txt` (version + content-hash stamp) so drift from the
+   source of truth is detectable. Copy it in and point your bundler at whichever
+   suits it: `nugget/src` for TypeScript-aware toolchains, `nugget/dist` for
+   bundlers that don't resolve `.ts` via `.js`-suffixed imports (e.g. Turbopack —
+   see below).
 
 `dist/` (ESM + `.d.ts`) is the package's own build output. `dist/` and
 `nugget/` are both committed and regenerated from `src/`; `prepublishOnly`

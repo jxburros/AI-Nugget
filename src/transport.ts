@@ -1,9 +1,11 @@
 import { AIError, classify, fromUnknown } from './errors.js';
 
-export function withTimeout(ms: number, external?: AbortSignal): {
+export function withTimeout(ms: number, external?: AbortSignal, idleMs?: number): {
   signal: AbortSignal;
   done(): void;
   timedOut(): boolean;
+  /** Reset the idle timer. No-op unless `idleMs` was supplied. Call on each chunk. */
+  bump(): void;
 } {
   const controller = new AbortController();
   let didTimeOut = false;
@@ -11,19 +13,36 @@ export function withTimeout(ms: number, external?: AbortSignal): {
     didTimeOut = true;
     controller.abort(new AIError(`Request timed out after ${ms}ms`, { kind: 'timeout' }));
   }, ms);
+  // Optional idle timeout: aborts only when no chunk has arrived for `idleMs`,
+  // rearmed on every `bump()`. Keeps a long but healthy stream alive while the
+  // total `ms` ceiling still bounds a truly stuck call.
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const armIdle = (): void => {
+    if (idleMs === undefined) return;
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      didTimeOut = true;
+      controller.abort(new AIError(`Request idle for ${idleMs}ms`, { kind: 'timeout' }));
+    }, idleMs);
+  };
   const onAbort = () => controller.abort(external?.reason);
   if (external) {
     if (external.aborted) onAbort();
     else external.addEventListener('abort', onAbort, { once: true });
   }
+  armIdle();
   return {
     signal: controller.signal,
     done() {
       clearTimeout(timer);
+      if (idleTimer) clearTimeout(idleTimer);
       external?.removeEventListener('abort', onAbort);
     },
     timedOut() {
       return didTimeOut;
+    },
+    bump() {
+      armIdle();
     },
   };
 }

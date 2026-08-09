@@ -1,6 +1,7 @@
 import { adapterFor } from './adapters/index.js';
 import { applyAuth, profileFor } from './adapters/profiles.js';
 import { AIError, fromUnknown } from './errors.js';
+import { extractJson } from './json.js';
 import { allowAllPolicy } from './policy.js';
 import { SessionRedactor } from './redact.js';
 import type {
@@ -9,13 +10,18 @@ import type {
   ChatRequest,
   ChatResult,
   Connection,
+  EmbedRequest,
+  EmbedResult,
   GovernancePolicy,
   KeySource,
   ModelInfo,
+  ParsedResult,
   Redactor,
   ResolvedConnection,
+  StandardSchemaV1,
   StreamEvent,
   TelemetrySink,
+  Usage,
 } from './types.js';
 import { promptChars, sleep } from './util.js';
 
@@ -37,6 +43,13 @@ export interface HandlerOptions {
   };
   retry?: { maxAttempts?: number; baseDelayMs?: number; maxDelayMs?: number };
   limits?: { maxConcurrent?: number; minIntervalMs?: number };
+  /**
+   * Optional cost estimator. Called once per successful call/embedding with the
+   * final usage; its return value (USD) is stored on the telemetry record's
+   * `costUsd`. Return undefined to leave a call uncosted. Pricing tables live in
+   * the app, not the library — this is only the seam to attach one.
+   */
+  pricing?(info: { provider: string; model: string; usage: Usage }): number | undefined;
 }
 
 export class AIHandler {
@@ -83,7 +96,7 @@ export class AIHandler {
       yield { type: 'error', error: this.redactedError(error) };
       return;
     }
-    const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata };
+    const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata, resolved: safeResolved(resolved) };
     try {
       if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
         const error = new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
@@ -196,6 +209,119 @@ export class AIHandler {
     }
   }
 
+  /**
+   * Warm a connection so the first real call doesn't pay cold DNS/TLS and
+   * (for a local daemon) process spin-up on the hot path. Runs a lightweight
+   * health probe and never throws — call it once at boot. Combined with a CJS
+   * `require` path it removes the cold-start "offline" false negative.
+   */
+  async prewarm(conn: Connection): Promise<void> {
+    try {
+      await this.testConnection(conn);
+    } catch {
+      // Warm-up only: a failure here just means the first real call pays the cost.
+    }
+  }
+
+  /**
+   * Chat that returns typed, validated output. Requests JSON mode, extracts the
+   * JSON from the reply, and validates it against any Standard Schema validator
+   * (Zod / Valibot / ArkType). On a validation miss it performs exactly one
+   * corrective retry that shows the model its error, then throws
+   * `invalid_response` if still invalid. No schema library is bundled — the
+   * caller supplies the schema.
+   */
+  async chatParsed<T>(conn: Connection, req: ChatRequest, schema: StandardSchemaV1<T>): Promise<ParsedResult<T>> {
+    const base: ChatRequest = { ...req, responseFormat: req.responseFormat ?? { type: 'json' } };
+    let result = await this.chat(conn, base);
+    let validated = await validateWithSchema(schema, result.text);
+    if (validated.ok) return { data: validated.value, result };
+
+    const retry: ChatRequest = {
+      ...base,
+      messages: [
+        ...base.messages,
+        { role: 'assistant', content: result.text },
+        { role: 'user', content: `That response did not match the required schema (${validated.message}). Reply again with ONLY a valid JSON value that matches it.` },
+      ],
+    };
+    result = await this.chat(conn, retry);
+    validated = await validateWithSchema(schema, result.text);
+    if (validated.ok) return { data: validated.value, result };
+    throw new AIError(`Model output failed schema validation: ${validated.message}`, { kind: 'invalid_response', provider: conn.provider });
+  }
+
+  /**
+   * Produce embeddings through the same governed pipeline as chat: policy check,
+   * key resolution, `beforeCall` hook, concurrency, and exactly one redacted
+   * telemetry record. Throws a typed `invalid_request` error for providers whose
+   * adapter has no `embed` (Anthropic, Google) rather than failing silently.
+   */
+  async embed(conn: Connection, req: EmbedRequest): Promise<EmbedResult> {
+    const callId = createCallId();
+    const startedAt = Date.now();
+    const inputChars = (Array.isArray(req.input) ? req.input : [req.input]).reduce((sum, text) => sum + text.length, 0);
+    const fail = async (error: AIError): Promise<never> => {
+      await this.recordEmbed(callId, conn, req, startedAt, { estimated: true }, inputChars, error);
+      throw this.redactedError(error);
+    };
+
+    const policyResult = this.policy.checkModel(conn.provider, req.model);
+    if (!policyResult.allowed) return fail(new AIError(policyResult.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider }));
+
+    let resolved: ResolvedConnection;
+    try {
+      resolved = await this.resolveConnection(conn);
+    } catch (errorValue) {
+      return fail(fromUnknown(errorValue, conn.provider));
+    }
+
+    const adapter = adapterFor(conn.provider, conn.baseUrl);
+    if (!adapter.embed) {
+      return fail(new AIError(`Provider ${conn.provider} does not support embeddings`, { kind: 'invalid_request', retryable: false, provider: conn.provider }));
+    }
+
+    try {
+      const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata, resolved: safeResolved(resolved) };
+      if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
+        return fail(new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider }));
+      }
+    } catch (errorValue) {
+      return fail(fromUnknown(errorValue, conn.provider));
+    }
+
+    await this.acquire(req.signal);
+    try {
+      const result = await adapter.embed(resolved, req);
+      await this.recordEmbed(callId, conn, req, startedAt, result.usage, inputChars);
+      return result;
+    } catch (errorValue) {
+      return fail(fromUnknown(errorValue, conn.provider));
+    } finally {
+      this.release();
+    }
+  }
+
+  private async recordEmbed(callId: string, conn: Connection, req: EmbedRequest, startedAt: number, usage: Usage, inputChars: number, error?: AIError): Promise<void> {
+    const costUsd = error ? undefined : this.opts.pricing?.({ provider: conn.provider, model: req.model, usage });
+    await this.record({
+      callId,
+      connectionId: conn.id,
+      provider: conn.provider,
+      model: req.model,
+      startedAt,
+      timing: { firstTokenMs: null, totalMs: Date.now() - startedAt },
+      usage,
+      finishReason: error ? (error.kind === 'canceled' ? 'canceled' : 'error') : 'stop',
+      ...(error ? { error: { kind: error.kind, status: error.status, message: error.message } } : {}),
+      attempts: 1,
+      metadata: { ...req.metadata, operation: '__embed__' },
+      promptChars: inputChars,
+      responseChars: 0,
+      ...(costUsd !== undefined ? { costUsd } : {}),
+    });
+  }
+
   private async runProbe<T>(conn: Connection, operation: '__listModels__' | '__testConnection__', action: (resolved: ResolvedConnection) => Promise<T>): Promise<T> {
     const callId = createCallId();
     const startedAt = Date.now();
@@ -209,7 +335,7 @@ export class AIHandler {
     let resolved: ResolvedConnection;
     try {
       resolved = await this.resolveConnection(conn);
-      const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: operation, metadata: req.metadata };
+      const info: CallInfo = { callId, connection: conn, provider: conn.provider, model: operation, metadata: req.metadata, resolved: safeResolved(resolved) };
       if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
         throw new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
       }
@@ -309,6 +435,7 @@ export class AIHandler {
   }
 
   private async recordSuccess(callId: string, conn: Connection, req: ChatRequest, startedAt: number, attempts: number, result: ChatResult): Promise<void> {
+    const costUsd = this.opts.pricing?.({ provider: conn.provider, model: req.model, usage: result.usage });
     await this.record({
       callId,
       connectionId: conn.id,
@@ -322,6 +449,7 @@ export class AIHandler {
       metadata: req.metadata,
       promptChars: promptChars(req.messages),
       responseChars: result.text.length,
+      ...(costUsd !== undefined ? { costUsd } : {}),
     });
   }
 
@@ -406,6 +534,23 @@ function redactMetadata(metadata: Record<string, unknown> | undefined, redact: (
 
 function trimSlash(value: string): string {
   return value.replace(/\/+$/, '');
+}
+
+/** Drops the resolved API key so a `beforeCall` hook can inspect the endpoint but never the secret. */
+function safeResolved(resolved: ResolvedConnection): Omit<ResolvedConnection, 'apiKey'> {
+  const { apiKey: _apiKey, ...rest } = resolved;
+  return rest;
+}
+
+async function validateWithSchema<T>(schema: StandardSchemaV1<T>, text: string): Promise<{ ok: true; value: T } | { ok: false; message: string }> {
+  const value = extractJson(text);
+  if (value === null) return { ok: false, message: 'no JSON found in model output' };
+  const result = await schema['~standard'].validate(value);
+  if (result.issues) {
+    const message = result.issues.map((issue) => issue.message).join('; ');
+    return { ok: false, message: message || 'validation failed' };
+  }
+  return { ok: true, value: result.value };
 }
 
 function createCallId(): string {

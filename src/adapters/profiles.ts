@@ -34,6 +34,12 @@ export interface ProviderProfile {
     maxTokensRequired?: boolean;
     maxTokensParam?: 'max_tokens' | 'max_completion_tokens';
     supportsJsonSchema?: boolean;
+    /**
+     * Default value for the `{apiVersion}` token in `urlTemplate` (Azure OpenAI).
+     * Overridable per call via `ChatRequest.providerOptions.apiVersion`, so a
+     * retired Azure api-version never requires a library release.
+     */
+    apiVersion?: string;
   };
   listModelsPath?: string;
   healthPath?: string;
@@ -55,7 +61,7 @@ export const PROVIDER_PROFILES: Record<string, ProviderProfile> = {
     engine: 'openaiChat',
     auth: 'api-key-header',
     capabilities: HOSTED_CLOUD,
-    quirks: { urlTemplate: '{baseUrl}/openai/deployments/{model}/chat/completions?api-version=2024-10-21', maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true },
+    quirks: { urlTemplate: '{baseUrl}/openai/deployments/{model}/chat/completions?api-version={apiVersion}', apiVersion: '2024-10-21', maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true },
   },
   openrouter: {
     engine: 'openaiChat',
@@ -71,6 +77,12 @@ export const PROVIDER_PROFILES: Record<string, ProviderProfile> = {
   mistral: { engine: 'openaiChat', defaultBaseUrl: 'https://api.mistral.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
   together: { engine: 'openaiChat', defaultBaseUrl: 'https://api.together.xyz/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
   fireworks: { engine: 'openaiChat', defaultBaseUrl: 'https://api.fireworks.ai/inference/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+  cerebras: { engine: 'openaiChat', defaultBaseUrl: 'https://api.cerebras.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+  moonshot: { engine: 'openaiChat', defaultBaseUrl: 'https://api.moonshot.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+  // Cohere's OpenAI-compatible surface lives under /compatibility/v1.
+  cohere: { engine: 'openaiChat', defaultBaseUrl: 'https://api.cohere.ai/compatibility/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+  // Perplexity has no public model-listing endpoint, so listModels resolves empty.
+  perplexity: { engine: 'openaiChat', defaultBaseUrl: 'https://api.perplexity.ai', auth: 'bearer', capabilities: HOSTED_CLOUD },
   lmstudio: {
     engine: 'openaiChat',
     defaultBaseUrl: 'http://localhost:1234/v1',

@@ -10,6 +10,16 @@ await rm(out, { recursive: true, force: true });
 await mkdir(out, { recursive: true });
 await cp(join(root, 'src'), join(out, 'src'), { recursive: true });
 
+// Also vendor the compiled ESM output when present, so bundlers that can't
+// resolve TypeScript `.js`-specifier source (e.g. Next.js Turbopack) can vendor
+// `nugget/dist` instead of `nugget/src`. Best-effort: skipped if `dist/` has not
+// been built yet (the VERSION hash below still covers `src/` only).
+try {
+  await cp(join(root, 'dist'), join(out, 'dist'), { recursive: true });
+} catch {
+  // dist/ not built — `npm run build` before `build:nugget` to include it.
+}
+
 const hash = createHash('sha256');
 async function hashFiles(dir) {
   const { readdir, stat, readFile: read } = await import('node:fs/promises');
