@@ -1,10 +1,10 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
-import { postResponse, sseLines } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
+import { fetchJson, postResponse, sseLines } from '../../transport.js';
+import type { ChatMessage, ChatRequest, ChatResult, EmbedRequest, EmbedResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
-import { health, listOpenModels, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, health, listOpenModels, streamError, streamTimeout } from './base.js';
 
 export class OpenAIChatAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -34,7 +34,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(urlFor(conn, this.profile, req.model), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(urlFor(conn, this.profile, req), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -47,11 +47,13 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         outputTokens = parsed.outputTokens;
         finish = parsed.finish;
         sawTerminal = true;
+        if (parsed.reasoning) yield { type: 'reasoning', text: parsed.reasoning };
         if (text) yield { type: 'delta', text };
         for (const call of toolCalls) yield { type: 'tool_call', call };
       } else {
         const partialTools = new Map<number, { id?: string; name?: string; raw: string }>();
         for await (const line of sseLines(res)) {
+          timeout.bump();
           const chunk = safeParse(line);
           const record = asRecord(chunk);
           if (!record) continue;
@@ -63,6 +65,10 @@ export class OpenAIChatAdapter implements ProviderAdapter {
           finish = asString(choice?.finish_reason) ?? finish;
           if (choice?.finish_reason) sawTerminal = true;
           const delta = asRecord(choice?.delta);
+          // Reasoning tokens (DeepSeek `reasoning_content`, others `reasoning`)
+          // ride their own channel so they don't contaminate the answer text.
+          const reasoning = asString(delta?.reasoning_content) ?? asString(delta?.reasoning);
+          if (reasoning) yield { type: 'reasoning', text: reasoning };
           const piece = asString(delta?.content);
           if (piece) {
             if (firstTokenMs === null) firstTokenMs = Date.now() - started;
@@ -108,6 +114,36 @@ export class OpenAIChatAdapter implements ProviderAdapter {
   health(conn: ResolvedConnection) {
     return health(conn, this.profile);
   }
+
+  async embed(conn: ResolvedConnection, req: EmbedRequest): Promise<EmbedResult> {
+    const inputs = Array.isArray(req.input) ? req.input : [req.input];
+    const { data } = await fetchJson(joinUrl(conn.baseUrl, '/embeddings'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...conn.headers },
+      body: JSON.stringify(applyProviderOptions({ model: req.model, input: inputs }, req.providerOptions)),
+      timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      provider: conn.provider,
+    });
+    const record = asRecord(data);
+    const rows = Array.isArray(record?.data) ? record.data : [];
+    // Order by the `index` each row reports, falling back to array order.
+    const byIndex = rows
+      .map((row, i) => ({ index: asNumber(asRecord(row)?.index) ?? i, embedding: asEmbedding(asRecord(row)?.embedding) }))
+      .sort((a, b) => a.index - b.index);
+    const usage = asRecord(record?.usage);
+    const inputTokens = asNumber(usage?.prompt_tokens);
+    return {
+      embeddings: byIndex.map((row) => row.embedding),
+      model: req.model,
+      usage: { inputTokens, outputTokens: 0, estimated: inputTokens === undefined },
+      source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
+      raw: data,
+    };
+  }
+}
+
+function asEmbedding(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((n): n is number => typeof n === 'number') : [];
 }
 
 function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, unknown> {
@@ -127,7 +163,12 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, 
     stream_options: profile.quirks?.supportsUsageInStream ? { include_usage: true } : undefined,
   };
   if (req.maxTokens !== undefined) body[profile.quirks?.maxTokensParam ?? 'max_tokens'] = req.maxTokens;
-  return body;
+  // providerOptions carries OpenAI-native fields the nugget doesn't model
+  // (`reasoning_effort`, `parallel_tool_calls`, `seed`, `logprobs`, …). `apiVersion`
+  // is consumed by urlFor for Azure and stripped here so it never hits the body.
+  const { apiVersion, ...passthrough } = req.providerOptions ?? {};
+  void apiVersion;
+  return applyProviderOptions(body, Object.keys(passthrough).length ? passthrough : undefined);
 }
 
 function responseFormatFor(req: ChatRequest, profile: ProviderProfile): Record<string, unknown> | undefined {
@@ -152,22 +193,31 @@ function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
   };
 }
 
-function urlFor(conn: ResolvedConnection, profile: ProviderProfile, model: string): string {
+function urlFor(conn: ResolvedConnection, profile: ProviderProfile, req: ChatRequest): string {
   if (profile.quirks?.urlTemplate) {
-    return profile.quirks.urlTemplate.replace('{baseUrl}', conn.baseUrl).replace('{model}', encodeURIComponent(model));
+    // `{apiVersion}` (Azure) is filled from a per-call override, then the
+    // profile default — so a retired Azure api-version is fixable without a
+    // library release: pass `providerOptions: { apiVersion: '2025-01-01-preview' }`.
+    const apiVersion = asString(req.providerOptions?.apiVersion) ?? profile.quirks.apiVersion ?? '';
+    return profile.quirks.urlTemplate
+      .replace('{baseUrl}', conn.baseUrl)
+      .replace('{model}', encodeURIComponent(req.model))
+      .replace('{apiVersion}', apiVersion);
   }
-  return `${conn.baseUrl}/chat/completions`;
+  return joinUrl(conn.baseUrl, '/chat/completions');
 }
 
-function parseOpenAiResponse(raw: unknown): { text: string; toolCalls: ToolCall[]; inputTokens?: number; outputTokens?: number; finish?: string } {
+function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; toolCalls: ToolCall[]; inputTokens?: number; outputTokens?: number; finish?: string } {
   const record = asRecord(raw);
   const usage = asRecord(record?.usage);
   const choice = asRecord(Array.isArray(record?.choices) ? record.choices[0] : undefined);
   const message = asRecord(choice?.message);
   const text = asString(message?.content) ?? asString(record?.text) ?? '';
+  const reasoning = asString(message?.reasoning_content) ?? asString(message?.reasoning);
   const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
   return {
     text,
+    reasoning,
     finish: asString(choice?.finish_reason),
     toolCalls: calls.map((value) => {
       const call = asRecord(value);

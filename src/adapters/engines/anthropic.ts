@@ -1,9 +1,9 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
-import { postResponse, sseLines } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
-import { streamError, streamTimeout } from './base.js';
+import { fetchJson, postResponse, sseLines } from '../../transport.js';
+import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
+import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
 
 const JSON_MODE_TOOL = 'json_output';
 
@@ -58,6 +58,7 @@ export class AnthropicAdapter implements ProviderAdapter {
         }
       } else {
         for await (const line of sseLines(res)) {
+          timeout.bump();
           const record = asRecord(safeParse(line));
           if (!record) continue;
           const type = asString(record.type);
@@ -81,6 +82,10 @@ export class AnthropicAdapter implements ProviderAdapter {
                 text += piece;
                 yield { type: 'delta', text: piece };
               }
+            } else if (delta?.type === 'thinking_delta') {
+              // Extended-thinking tokens ride the reasoning channel, kept out of `text`.
+              const piece = asString(delta.thinking) ?? '';
+              if (piece) yield { type: 'reasoning', text: piece };
             } else if (delta?.type === 'input_json_delta') {
               const partial = blocks.get(index);
               if (partial) partial.raw += asString(delta.partial_json) ?? '';
@@ -124,6 +129,25 @@ export class AnthropicAdapter implements ProviderAdapter {
       timeout.done();
     }
   }
+
+  /**
+   * Lists models from Anthropic's `/v1/models` endpoint (auth + version headers
+   * already applied to `conn.headers`). The endpoint does not report a context
+   * window, so `contextWindow` is left undefined rather than guessed.
+   */
+  async listModels(conn: ResolvedConnection): Promise<ModelInfo[]> {
+    const { data } = await fetchJson(joinUrl(conn.baseUrl, '/v1/models'), {
+      method: 'GET',
+      headers: conn.headers,
+      timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 15_000),
+      provider: conn.provider,
+    });
+    const rows = Array.isArray(asRecord(data)?.data) ? asRecord(data)!.data as unknown[] : [];
+    return rows
+      .map((row) => asString(asRecord(row)?.id))
+      .filter((id): id is string => Boolean(id))
+      .map((id) => ({ id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } }));
+  }
 }
 
 function body(req: ChatRequest, jsonMode: boolean): Record<string, unknown> {
@@ -149,7 +173,9 @@ function body(req: ChatRequest, jsonMode: boolean): Record<string, unknown> {
     else if (req.toolChoice === 'auto') base.tool_choice = { type: 'auto' };
     else if (req.toolChoice === 'none') base.tool_choice = { type: 'none' };
   }
-  return base;
+  // providerOptions carries Anthropic-native fields (`thinking`, `metadata`,
+  // top-level `cache_control` extras, `service_tier`, …) without a release.
+  return applyProviderOptions(base, req.providerOptions);
 }
 
 function toAnthropicMessages(messages: ChatMessage[]): Record<string, unknown>[] {
@@ -173,26 +199,28 @@ function toAnthropicMessages(messages: ChatMessage[]): Record<string, unknown>[]
 }
 
 function toAnthropicMessage(m: ChatMessage): Record<string, unknown> {
-  // tool result messages map to a user turn carrying a tool_result content block.
-  if (m.role === 'tool') {
-    return {
-      role: 'user',
-      content: [{ type: 'tool_result', tool_use_id: m.toolCallId ?? '', content: typeof m.content === 'string' ? m.content : '' }],
-    };
-  }
-  // assistant turns that carried tool calls replay them as tool_use blocks.
+  // Tool-role messages are handled by toAnthropicMessages' batching loop and
+  // never reach here, so no tool branch is needed.
+
+  // assistant turns that carried tool calls replay them as tool_use blocks,
+  // preserving any text/image content parts that accompanied the calls.
   if (m.role === 'assistant' && m.toolCalls?.length) {
-    const content: unknown[] = [];
-    if (typeof m.content === 'string' && m.content) content.push({ type: 'text', text: m.content });
+    const content: unknown[] = [...contentBlocks(m.content)];
     for (const call of m.toolCalls) content.push({ type: 'tool_use', id: call.id, name: call.name, input: call.arguments ?? {} });
     return { role: 'assistant', content };
   }
   return {
     role: m.role === 'assistant' ? 'assistant' : 'user',
-    content: typeof m.content === 'string' ? m.content : m.content.map((part) => part.type === 'image'
-      ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
-      : { type: 'text', text: part.text ?? '' }),
+    content: typeof m.content === 'string' ? m.content : contentBlocks(m.content),
   };
+}
+
+/** Maps text/image content — a string or a ContentPart[] — onto Anthropic content blocks. */
+function contentBlocks(content: ChatMessage['content']): unknown[] {
+  if (typeof content === 'string') return content ? [{ type: 'text', text: content }] : [];
+  return content.map((part) => part.type === 'image'
+    ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
+    : { type: 'text', text: part.text ?? '' });
 }
 
 function textContent(content: ChatMessage['content']): string {

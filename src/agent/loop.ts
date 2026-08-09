@@ -3,8 +3,8 @@ import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import type { AIHandler } from '../handler.js';
-import type { ChatMessage, Connection, StreamEvent, ToolCall, Usage } from '../types.js';
-import { sleep } from '../util.js';
+import type { AIErrorKind, ChatMessage, Connection, StreamEvent, ToolCall, Usage } from '../types.js';
+import { asRecord, sleep } from '../util.js';
 import type { ToolSpec } from './tools.js';
 import { validateToolArgs } from './tools.js';
 
@@ -25,12 +25,40 @@ export interface AgentOptions {
    * dependent, not protocol-guaranteed.
    */
   toolMode?: 'native' | 'promptJson' | 'auto';
+  /**
+   * Discovered capabilities of the specific model (e.g. Ollama `/api/show`
+   * `["tools"]`). When `toolMode` is `auto`, a `tools` capability here upgrades a
+   * local model to `native` tool-calling instead of the profile's conservative
+   * `promptJson` default — so a capable local model isn't forced onto the fallback.
+   */
+  modelCapabilities?: string[];
+  /** Sampler/decoding options forwarded to every model turn (parity with a plain chat call). */
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
+  stopSequences?: string[];
+  /** Provider-native passthrough forwarded to every turn — see {@link ChatRequest.providerOptions}. */
+  providerOptions?: Record<string, unknown>;
   budget?: {
     maxSteps?: number;
     maxTokens?: number;
     deadlineMs?: number;
   };
   approval?: ApprovalGate;
+  /**
+   * Which tools require the approval gate. `sideEffectsOnly` (default) gates only
+   * tools declared `sideEffects: true`; `all` gates every tool — so `tool_denied`
+   * is reachable without marking each tool, and a consumer can require approval
+   * for a whole run in one place.
+   */
+  approvalMode?: 'sideEffectsOnly' | 'all';
+  /**
+   * Bounds and framing applied to each tool result before it re-enters the
+   * model's context. `maxChars` truncates oversized results (with a notice) so a
+   * single large return can't blow the next turn's window; `wrapUntrusted` fences
+   * the result in an `<untrusted_tool_output>` envelope. Both are opt-in.
+   */
+  toolResult?: { maxChars?: number; wrapUntrusted?: boolean };
   onEvent?: (e: AgentEvent) => void;
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
@@ -45,6 +73,9 @@ export type ApprovalGate = (req: {
 export type AgentEvent =
   | StreamEvent
   | { type: 'step_start'; step: number }
+  // Discloses which tool-calling protocol this run resolved to, so a
+  // `promptJson` fallback is visible rather than silent.
+  | { type: 'tool_mode'; mode: 'native' | 'promptJson' }
   | { type: 'tool_start'; step: number; call: ToolCall }
   | { type: 'tool_result'; step: number; call: ToolCall; result: unknown; isError: boolean }
   | { type: 'tool_denied'; step: number; call: ToolCall; reason: string }
@@ -56,6 +87,11 @@ export interface AgentResult {
   usage: Usage;
   steps: number;
   stopReason: 'finished' | 'max_steps' | 'budget' | 'deadline' | 'canceled' | 'error';
+  /**
+   * Populated when `stopReason` is `error`: the failure that ended the run, so
+   * the caller can see what went wrong without replaying the event stream.
+   */
+  error?: { kind: AIErrorKind; message: string };
 }
 
 export function runAgent(opts: AgentOptions): AsyncIterable<AgentEvent> & { result: Promise<AgentResult> } {
@@ -77,6 +113,10 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
   let step = 0;
   let settled = false;
 
+  // Disclose the resolved tool protocol once up front (a silent promptJson
+  // fallback was the friction behind FR‑2).
+  yield emit(opts, { type: 'tool_mode', mode: toolMode });
+
   try {
     while (step < maxSteps) {
       step += 1;
@@ -86,15 +126,31 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       const calls: ToolCall[] = [];
       let stepText = '';
       let streamFailure: AIError | undefined;
+      // In promptJson mode a tool directive must not leak into the visible
+      // stream, so directive-looking text is withheld from `delta` events (still
+      // accumulated in `stepText` for parsing). Prose streams normally.
+      const filter = toolMode === 'promptJson' ? new PromptJsonDeltaFilter() : undefined;
       const requestMessages = toolMode === 'promptJson' ? withPromptJsonInstruction(messages, opts.tools) : messages;
       for await (const event of opts.handler.stream(opts.connection, {
         model: opts.model,
         messages: requestMessages,
         tools: toolMode === 'promptJson' ? undefined : opts.tools,
+        temperature: opts.temperature,
+        maxTokens: opts.maxTokens,
+        topP: opts.topP,
+        stopSequences: opts.stopSequences,
+        providerOptions: opts.providerOptions,
         signal: agentSignal.signal,
         metadata: { ...opts.metadata, agentStep: step },
       })) {
-        if (event.type === 'delta') stepText += event.text;
+        if (event.type === 'delta') {
+          stepText += event.text;
+          if (filter) {
+            const visible = filter.push(event.text);
+            if (visible) yield emit(opts, { type: 'delta', text: visible });
+            continue;
+          }
+        }
         if (event.type === 'tool_call') calls.push(event.call);
         if (event.type === 'error') streamFailure = event.error;
         if (event.type === 'done') {
@@ -103,10 +159,16 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
         }
         yield emit(opts, event);
       }
+      // If withheld text turned out not to be a real directive, flush it so the
+      // user still sees the model's answer.
+      if (filter && calls.length === 0) {
+        const flushed = filter.flush();
+        if (flushed) yield emit(opts, { type: 'delta', text: flushed });
+      }
 
       // A handler-level failure (auth, policy, cancel, exhausted retries) must
       // stop the loop honestly rather than looking like an empty completion.
-      if (streamFailure) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error');
+      if (streamFailure) return yield* yieldDone(agentSignal.timedOut() ? 'deadline' : streamFailure.kind === 'canceled' ? 'canceled' : 'error', errorInfo(streamFailure));
 
       finalText = stepText;
       messages.push(toolMode === 'promptJson'
@@ -127,7 +189,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
           continue;
         }
         let args = validation.args;
-        if (tool.sideEffects) {
+        const requiresApproval = tool.sideEffects || opts.approvalMode === 'all';
+        if (requiresApproval) {
           if (!opts.approval) {
             yield* appendToolDenied(opts, messages, step, call, 'No approval gate configured');
             continue;
@@ -165,8 +228,16 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
           continue;
         }
         try {
-          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: JSON.stringify(executed.result) });
-          yield emit(opts, { type: 'tool_result', step, call, result: executed.result, isError: false });
+          // Guard against a tool returning `undefined` (JSON.stringify(undefined)
+          // is the value `undefined`, not a string) — an unguarded value here
+          // used to crash the next step's message mapper and kill the whole run.
+          const serialized = JSON.stringify(executed.result) ?? 'null';
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: formatToolResult(serialized, opts.toolResult) });
+          // A tool that returns a structured `{ ok: false, ... }` is a recoverable
+          // error the model should react to — surface it as an error result.
+          const record = asRecord(executed.result);
+          const isError = record?.ok === false;
+          yield emit(opts, { type: 'tool_result', step, call, result: executed.result, isError });
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Tool result was not serializable';
           yield* appendToolError(opts, messages, step, call, message);
@@ -179,7 +250,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     }
     return yield* yieldDone('max_steps');
   } catch (error) {
-    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error');
+    const stopReason = agentSignal.timedOut() ? 'deadline' : (agentSignal.signal?.aborted || (error instanceof AIError && error.kind === 'canceled')) ? 'canceled' : 'error';
+    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason, stopReason === 'error' ? errorInfo(error) : undefined);
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
@@ -191,8 +263,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
     }
   }
 
-  function* yieldDone(stopReason: AgentResult['stopReason']): Generator<AgentEvent> {
-    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason);
+  function* yieldDone(stopReason: AgentResult['stopReason'], error?: AgentResult['error']): Generator<AgentEvent> {
+    const result = makeResult(finalText, messages, usage ?? { estimated: true }, step, stopReason, error);
     settled = true;
     resolveResult(result);
     yield emit(opts, { type: 'agent_done', result });
@@ -204,8 +276,68 @@ function emit<T extends AgentEvent>(opts: AgentOptions, event: T): T {
   return event;
 }
 
-function makeResult(finalText: string, messages: ChatMessage[], usage: Usage, steps: number, stopReason: AgentResult['stopReason']): AgentResult {
-  return { finalText, messages, usage, steps, stopReason };
+function makeResult(finalText: string, messages: ChatMessage[], usage: Usage, steps: number, stopReason: AgentResult['stopReason'], error?: AgentResult['error']): AgentResult {
+  return error ? { finalText, messages, usage, steps, stopReason, error } : { finalText, messages, usage, steps, stopReason };
+}
+
+function errorInfo(error: unknown): { kind: AIErrorKind; message: string } {
+  if (error instanceof AIError) return { kind: error.kind, message: error.message };
+  return { kind: 'tool_error', message: error instanceof Error ? error.message : 'Agent run failed' };
+}
+
+/**
+ * Applies the optional size cap and untrusted-content framing to a serialized
+ * tool result before it re-enters the model's context.
+ */
+function formatToolResult(serialized: string, opts: AgentOptions['toolResult']): string {
+  let out = serialized;
+  const max = opts?.maxChars;
+  if (max !== undefined && out.length > max) {
+    out = `${out.slice(0, max)}\n…[truncated ${out.length - max} chars]`;
+  }
+  if (opts?.wrapUntrusted) {
+    out = `<untrusted_tool_output>\n${out}\n</untrusted_tool_output>`;
+  }
+  return out;
+}
+
+/**
+ * Withholds a promptJson tool directive from the visible `delta` stream. Once
+ * the leading non-whitespace character is known: a `{`, `[`, or fence marks a
+ * directive candidate whose text is buffered (never streamed); anything else is
+ * prose that streams through untouched. `flush()` returns any buffered text when
+ * the stream ended without yielding a parsed directive.
+ */
+class PromptJsonDeltaFilter {
+  private decided = false;
+  private withhold = false;
+  private buffer = '';
+
+  push(text: string): string {
+    if (!this.decided) {
+      this.buffer += text;
+      const lead = this.buffer.replace(/^\s+/, '');
+      if (lead.length === 0) return '';
+      this.decided = true;
+      this.withhold = /^[[{`]/.test(lead);
+      if (this.withhold) return '';
+      const flushed = this.buffer;
+      this.buffer = '';
+      return flushed;
+    }
+    if (this.withhold) {
+      this.buffer += text;
+      return '';
+    }
+    return text;
+  }
+
+  flush(): string {
+    if (!this.withhold) return '';
+    const out = this.buffer;
+    this.buffer = '';
+    return out;
+  }
 }
 
 function* appendToolError(opts: AgentOptions, messages: ChatMessage[], step: number, call: ToolCall, message: string): Generator<AgentEvent> {
@@ -222,14 +354,22 @@ function* appendToolDenied(opts: AgentOptions, messages: ChatMessage[], step: nu
 function resolveToolMode(opts: AgentOptions): 'native' | 'promptJson' {
   const mode = opts.toolMode ?? 'auto';
   if (mode !== 'auto') return mode;
+  // A model that actually advertises tool support gets native tool-calling even
+  // on a local runtime whose profile is conservatively `nativeTools: false`.
+  if (opts.modelCapabilities?.includes('tools')) return 'native';
   return profileFor(opts.connection.provider, opts.connection.baseUrl).capabilities.nativeTools ? 'native' : 'promptJson';
 }
 
 function withPromptJsonInstruction(messages: ChatMessage[], tools: ToolSpec[]): ChatMessage[] {
+  // Include each tool's parameter schema, not just its description, so the model
+  // knows the argument shape instead of guessing it (FR‑3).
+  const catalog = tools
+    .map((tool) => `- ${tool.name}: ${tool.description}\n  parameters: ${JSON.stringify(tool.parameters)}`)
+    .join('\n');
   return [
     {
       role: 'system',
-      content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. Available tools: ${tools.map((tool) => `${tool.name}: ${tool.description}`).join('; ')}`,
+      content: `When you need tools, respond only with JSON. For one tool: {"tool":"name","input":{...}}. For several in one turn: {"tools":[{"tool":"name","input":{...}}]}. The "input" object must match the tool's parameters schema. Available tools:\n${catalog}`,
     },
     ...messages.map(toPromptJsonMessage),
   ];

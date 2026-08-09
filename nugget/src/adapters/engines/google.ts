@@ -1,8 +1,8 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
+import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
 
 export class GoogleAdapter implements ProviderAdapter {
@@ -37,6 +37,7 @@ export class GoogleAdapter implements ProviderAdapter {
       const contentType = res.headers.get('content-type') ?? '';
       const chunks = contentType.includes('text/event-stream') ? sseLines(res) : singleJsonLine(res);
       for await (const line of chunks) {
+        timeout.bump();
         const parsed = safeParse(line);
         const record = asRecord(parsed);
         const promptFeedback = asRecord(record?.promptFeedback);
@@ -44,6 +45,12 @@ export class GoogleAdapter implements ProviderAdapter {
         for (const part of candidateParts(record)) {
           const partText = asString(asRecord(part)?.text);
           if (partText) {
+            // Gemini marks reasoning parts with `thought: true`; route those to
+            // the reasoning channel so they don't blend into the answer text.
+            if (asRecord(part)?.thought === true) {
+              yield { type: 'reasoning', text: partText };
+              continue;
+            }
             if (firstTokenMs === null) firstTokenMs = Date.now() - started;
             text += partText;
             yield { type: 'delta', text: partText };
@@ -90,7 +97,7 @@ export class GoogleAdapter implements ProviderAdapter {
    */
   async health(conn: ResolvedConnection): Promise<{ ok: boolean; detail?: string }> {
     try {
-      await fetchJson(`${conn.baseUrl}/v1beta/models`, {
+      await fetchJson(joinUrl(conn.baseUrl, '/v1beta/models'), {
         method: 'GET',
         headers: conn.headers,
         timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
@@ -100,6 +107,35 @@ export class GoogleAdapter implements ProviderAdapter {
     } catch (error) {
       return { ok: false, detail: error instanceof Error ? error.message : 'Health check failed' };
     }
+  }
+
+  /**
+   * Lists models from Google's `/v1beta/models`. Strips the `models/` name
+   * prefix, and maps `inputTokenLimit` → `contextWindow` and
+   * `supportedGenerationMethods` → `capabilities`.
+   */
+  async listModels(conn: ResolvedConnection): Promise<ModelInfo[]> {
+    const { data } = await fetchJson(joinUrl(conn.baseUrl, '/v1beta/models'), {
+      method: 'GET',
+      headers: conn.headers,
+      timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 15_000),
+      provider: conn.provider,
+    });
+    const rows = Array.isArray(asRecord(data)?.models) ? asRecord(data)!.models as unknown[] : [];
+    const models: ModelInfo[] = [];
+    for (const value of rows) {
+      const row = asRecord(value);
+      const name = asString(row?.name);
+      if (!name) continue;
+      const id = name.startsWith('models/') ? name.slice('models/'.length) : name;
+      const model: ModelInfo = { id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } };
+      const contextWindow = asNumber(row?.inputTokenLimit);
+      if (contextWindow !== undefined) model.contextWindow = contextWindow;
+      const methods = row?.supportedGenerationMethods;
+      if (Array.isArray(methods) && methods.every((m) => typeof m === 'string')) model.capabilities = methods as string[];
+      models.push(model);
+    }
+    return models;
   }
 }
 
@@ -126,7 +162,10 @@ function body(req: ChatRequest): Record<string, unknown> {
     if (typeof req.toolChoice === 'object') config.allowedFunctionNames = [req.toolChoice.name];
     payload.toolConfig = { functionCallingConfig: config };
   }
-  return payload;
+  // providerOptions reaches Google-native fields: top-level `safetySettings`,
+  // `cachedContent`, and `generationConfig` extras (`thinkingConfig`,
+  // `responseModalities`, …) merged one level deep into generationConfig.
+  return applyProviderOptions(payload, req.providerOptions, ['generationConfig']);
 }
 
 function toGoogleContents(messages: ChatMessage[]): Record<string, unknown>[] {
@@ -150,26 +189,25 @@ function toGoogleContents(messages: ChatMessage[]): Record<string, unknown>[] {
 }
 
 function toGoogleContent(m: ChatMessage): Record<string, unknown> {
-  if (m.role === 'tool') {
-    return {
-      role: 'user',
-      parts: [{ functionResponse: { name: m.name ?? 'unknown', response: toolResponseObject(m) } }],
-    };
-  }
+  // Tool-role messages are handled by toGoogleContents' batching loop and never
+  // reach here, so no tool branch is needed.
   if (m.role === 'assistant' && m.toolCalls?.length) {
-    const parts: unknown[] = [];
-    if (typeof m.content === 'string' && m.content) parts.push({ text: m.content });
+    const parts: unknown[] = [...googleParts(m.content)];
     for (const call of m.toolCalls) parts.push({ functionCall: { name: call.name, args: call.arguments ?? {} } });
     return { role: 'model', parts };
   }
   return {
     role: m.role === 'assistant' ? 'model' : 'user',
-    parts: typeof m.content === 'string'
-      ? [{ text: m.content }]
-      : m.content.map((part) => part.type === 'image'
-        ? { inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
-        : { text: part.text ?? '' }),
+    parts: googleParts(m.content),
   };
+}
+
+/** Maps text/image content — a string or a ContentPart[] — onto Google parts. */
+function googleParts(content: ChatMessage['content']): unknown[] {
+  if (typeof content === 'string') return content ? [{ text: content }] : [];
+  return content.map((part) => part.type === 'image'
+    ? { inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
+    : { text: part.text ?? '' });
 }
 
 function textContent(content: ChatMessage['content']): string {

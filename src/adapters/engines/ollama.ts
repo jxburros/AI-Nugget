@@ -1,9 +1,12 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, ndjsonLines, postResponse } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { asNumber, asRecord, asString, textFromMessages } from '../../util.js';
+import type { ChatMessage, ChatRequest, ChatResult, EmbedRequest, EmbedResult, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, mapWithConcurrency, textFromMessages } from '../../util.js';
 import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+
+/** Max concurrent /api/show probes when listing models — enough to be fast, few enough to be polite to a local daemon. */
+const SHOW_CONCURRENCY = 6;
 
 export class OllamaAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -32,10 +35,13 @@ export class OllamaAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(`${conn.baseUrl}/api/chat`, body(req), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(joinUrl(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider);
       for await (const value of ndjsonLines(res)) {
+        timeout.bump();
         const record = asRecord(value);
         const message = asRecord(record?.message);
+        const thinking = asString(message?.thinking);
+        if (thinking) yield { type: 'reasoning', text: thinking };
         const piece = asString(message?.content);
         if (piece) {
           if (firstTokenMs === null) firstTokenMs = Date.now() - started;
@@ -85,17 +91,38 @@ export class OllamaAdapter implements ProviderAdapter {
     });
     const models = Array.isArray(asRecord(data)?.models) ? asRecord(data)!.models as unknown[] : [];
     const ids = models.map((model) => asString(asRecord(model)?.name) ?? asString(asRecord(model)?.model) ?? '').filter(Boolean);
-    // Probe /api/show per model for context window + capabilities (best effort, sequential
-    // to avoid overwhelming a local Ollama instance).
-    const results: ModelInfo[] = [];
-    for (const id of ids) {
+    // Probe /api/show per model for context window + capabilities (best effort),
+    // with bounded concurrency so a large model list resolves quickly without
+    // opening an unbounded number of sockets against a local daemon.
+    return mapWithConcurrency(ids, SHOW_CONCURRENCY, async (id) => {
       const info: ModelInfo = { id, source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl } };
       const probed = await this.showModel(conn, id).catch(() => undefined);
       if (probed?.contextWindow !== undefined) info.contextWindow = probed.contextWindow;
       if (probed?.capabilities) info.capabilities = probed.capabilities;
-      results.push(info);
-    }
-    return results;
+      return info;
+    });
+  }
+
+  async embed(conn: ResolvedConnection, req: EmbedRequest): Promise<EmbedResult> {
+    const inputs = Array.isArray(req.input) ? req.input : [req.input];
+    const { data } = await fetchJson(joinUrl(conn.baseUrl, '/api/embed'), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...conn.headers },
+      body: JSON.stringify(applyProviderOptions({ model: req.model, input: inputs }, req.providerOptions)),
+      timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      provider: conn.provider,
+    });
+    const record = asRecord(data);
+    const rows = Array.isArray(record?.embeddings) ? record.embeddings : [];
+    const embeddings = rows.map((row) => (Array.isArray(row) ? row.filter((n): n is number => typeof n === 'number') : []));
+    const inputTokens = asNumber(record?.prompt_eval_count);
+    return {
+      embeddings,
+      model: req.model,
+      usage: { inputTokens, outputTokens: 0, estimated: inputTokens === undefined },
+      source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
+      raw: data,
+    };
   }
 
   private async showModel(conn: ResolvedConnection, model: string): Promise<{ contextWindow?: number; capabilities?: string[] }> {
@@ -124,7 +151,7 @@ export class OllamaAdapter implements ProviderAdapter {
 }
 
 function body(req: ChatRequest): Record<string, unknown> {
-  return {
+  const base: Record<string, unknown> = {
     model: req.model,
     messages: req.messages.map(toOllamaMessage),
     stream: true,
@@ -132,6 +159,11 @@ function body(req: ChatRequest): Record<string, unknown> {
     format: req.responseFormat?.type === 'json' ? (req.responseFormat.schema ?? 'json') : undefined,
     tools: req.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
   };
+  // providerOptions reaches Ollama's real request fields — `options.num_ctx`,
+  // `options.num_keep`, top-level `keep_alive`, `think`, etc. `options` is
+  // merged one level deep so num_ctx joins the samplers above rather than
+  // replacing them.
+  return applyProviderOptions(base, req.providerOptions, ['options']);
 }
 
 function toOllamaMessage(m: ChatMessage): Record<string, unknown> {

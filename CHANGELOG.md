@@ -11,6 +11,77 @@ phased build in `development-plan.md`; entries note which phase they advance.
   contract suites, generated-artifact drift checks, security invariants, and
   honest skip conditions for optional live-provider checks.
 
+## 2026-08-09 - Claude — 0.5.0
+
+Implements the AI Server Studio friction report's remediations. Numbers in
+brackets are that report's suggestion numbers. All changes are additive and
+backward-compatible; see `UPGRADING.md` for the consumer-facing summary.
+
+### Changed
+
+- **[4] `ChatRequest.providerOptions` / `EmbedRequest.providerOptions`** —
+  provider-native passthrough merged into the request body (shallow top-level;
+  one level deep into Ollama `options` and Google `generationConfig`). Ollama
+  `num_ctx`/`keep_alive`, OpenAI `reasoning_effort`, Anthropic `thinking`,
+  Google `safetySettings`, etc. are reachable without a release.
+- **[16] `Connection.idleTimeoutMs`** — idle-stream timeout distinct from the
+  total `timeoutMs`, rearmed per chunk in `withTimeout`/`streamTimeout` and
+  bumped by every engine's stream loop.
+- **[17] `reasoning` StreamEvent** — Anthropic `thinking_delta`, OpenAI
+  `reasoning_content`/`reasoning`, Gemini `thought` parts, and Ollama `thinking`
+  surface on their own channel instead of being dropped or mixed into `delta`.
+- **[18] `listModels()` for Anthropic & Google** — real `GET /v1/models` and
+  `GET /v1beta/models` (mapping `inputTokenLimit` → `contextWindow`) instead of `[]`.
+- **[19]** Ollama `/api/show` probes now run with bounded concurrency.
+- **[20]** New profiles: `cerebras`, `moonshot`, `cohere`, `perplexity`; Azure
+  `api-version` is a profile default overridable via `providerOptions.apiVersion`.
+- **[21]** `joinUrl` used in the `openai-compat` engine and `base.ts` (no
+  accidental double slash).
+- **[23] Embeddings** — `AIHandler.embed()` + `EmbedRequest`/`EmbedResult`,
+  implemented for Ollama (`/api/embed`) and OpenAI-compatible (`/embeddings`)
+  through the full governed pipeline; providers without support throw a typed
+  `invalid_request`.
+- **[15] `AIHandler.chatParsed()`** — Standard-Schema-validated JSON output with
+  one automatic corrective retry (no schema library bundled).
+- **[5]** Agent turns forward `temperature`/`maxTokens`/`topP`/`stopSequences`/
+  `providerOptions`. **[6]** `AgentOptions.modelCapabilities` upgrades a capable
+  local model to native tool-calling under `toolMode: 'auto'`. **[7]** promptJson
+  directives are withheld from visible `delta`s and a `tool_mode` event is
+  emitted. **[8]** tool parameter schemas are included in the promptJson prompt.
+  **[9]** `undefined` tool results no longer crash a run. **[10]**
+  `AgentResult.error`. **[11]** `{ ok: false }` tool returns surface as
+  `isError`. **[12]** `AgentOptions.toolResult` (`maxChars`/`wrapUntrusted`).
+  **[14]** `AgentOptions.approvalMode: 'all'`.
+- **[3] `AIHandler.prewarm()`**; **[22]** `CallInfo.resolved` (key omitted) for
+  `beforeCall`; **[24]** `HandlerOptions.pricing` → `CallRecord.costUsd`.
+- **[1] Dual ESM + CommonJS build** (`tsconfig.cjs.json` → `dist/cjs`, `require`
+  export condition). **[2]** `build:nugget` also vendors compiled `nugget/dist`.
+  **[26]** version → 0.5.0 with `UPGRADING.md`.
+- **[25]** Assistant messages carrying both content parts and tool calls keep
+  their text/image parts on replay (Anthropic, Google); dead `role:'tool'`
+  branches removed; `403 → non-retryable` documented; ESLint flat config
+  (`npm run lint`) and Vitest coverage (`npm run test:coverage`) added; README
+  refreshed (provider list, discovery note, stale test count removed).
+
+### Not completed
+
+- Consumer-side adoption in AI Server Studio — the dependency bump from
+  `^0.3.1` to `^0.5.0`, and using `prewarm()`/`pricing` there — is deferred
+  until 0.5.0 is published to the registry; bumping to an unpublished version
+  would break the consumer's install. The library side of every suggestion is
+  complete.
+- **[25]** partial: example mini-app lockfiles / `npm ci` not added (the
+  examples are separate packages), and MCP-style tool-name derivation is an
+  app-side concern, not a library one.
+
+### Notes
+
+- Validation on Node 22.22.2: `npm test` (128 passed, 6 live-gated skips),
+  `npm run test:browser` (128 passed — isomorphism, incl. the new embed/parsed/
+  agent code), `npm run build` (ESM + CJS; `require('@jxburros/ai-nugget')`
+  verified), `npm run build:nugget` (regenerated, includes `dist`),
+  `npm run lint` (clean). `dist/` and `nugget/` regenerated and committed.
+
 ## 2026-08-09 - Claude
 
 ### Changed

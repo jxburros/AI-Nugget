@@ -31,6 +31,56 @@ export function globalEnv(): Record<string, string | undefined> {
   return maybeProcess.process?.env ?? {};
 }
 
+/**
+ * Merges app-supplied {@link ChatRequest.providerOptions} into a provider
+ * request body: shallow at the top level, and one level deep for each key in
+ * `nestedKeys` where both sides are plain objects (Ollama `options`, Google
+ * `generationConfig`). Values in `providerOptions` win on collision.
+ */
+export function applyProviderOptions(
+  body: Record<string, unknown>,
+  providerOptions: Record<string, unknown> | undefined,
+  nestedKeys: readonly string[] = [],
+): Record<string, unknown> {
+  if (!providerOptions) return body;
+  const merged: Record<string, unknown> = { ...body };
+  for (const [key, value] of Object.entries(providerOptions)) {
+    const base = asRecord(merged[key]);
+    if (nestedKeys.includes(key) && base && asRecord(value)) {
+      merged[key] = { ...base, ...(value as Record<string, unknown>) };
+    } else {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+/** Joins a base URL and path without producing a double slash, even if `base` ends with `/`. */
+export function joinUrl(base: string, path: string): string {
+  return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Runs `fn` over `items` with at most `limit` in flight at once, preserving
+ * input order in the returned array. Used to probe many local models
+ * concurrently without opening an unbounded number of sockets.
+ */
+export async function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  };
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return Promise.resolve();
   return new Promise((resolve, reject) => {

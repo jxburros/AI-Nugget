@@ -41,6 +41,18 @@ export interface ChatRequest {
   stopSequences?: string[];
   signal?: AbortSignal;
   metadata?: Record<string, unknown>;
+  /**
+   * Provider-native request fields the nugget does not model as first-class
+   * options — an escape hatch so a caller can reach a capability without waiting
+   * for a library release. Merged into the outgoing provider request body:
+   * shallow at the top level, and one level deep into the provider's own nested
+   * option container (Ollama `options`, Google `generationConfig`). Examples:
+   * `{ options: { num_ctx: 8192 }, keep_alive: '30m' }` (Ollama),
+   * `{ reasoning_effort: 'high' }` (OpenAI), `{ thinking: { type: 'enabled' } }`
+   * (Anthropic), `{ safetySettings: [...] }` (Google). Values here win over the
+   * nugget's own fields on a key collision, so use with care.
+   */
+  providerOptions?: Record<string, unknown>;
 }
 
 export interface Connection {
@@ -50,6 +62,13 @@ export interface Connection {
   keyRef?: KeyRef;
   timeoutMs?: number;
   headers?: Record<string, string>;
+  /**
+   * Idle timeout for streaming calls: aborts the stream only if no bytes arrive
+   * for this many milliseconds, resetting on every chunk. Distinct from
+   * `timeoutMs`, which bounds the total call lifetime. Set this (and a generous
+   * `timeoutMs`) for long local generations that stream slowly but healthily.
+   */
+  idleTimeoutMs?: number;
 }
 
 export type KeyRef =
@@ -95,6 +114,25 @@ export interface ModelSource {
   baseUrl?: string;
 }
 
+export interface EmbedRequest {
+  model: string;
+  /** One string, or a batch of strings embedded in a single call. */
+  input: string | string[];
+  signal?: AbortSignal;
+  metadata?: Record<string, unknown>;
+  /** Provider-native passthrough, same contract as {@link ChatRequest.providerOptions}. */
+  providerOptions?: Record<string, unknown>;
+}
+
+export interface EmbedResult {
+  /** One vector per input, in input order. */
+  embeddings: number[][];
+  model: string;
+  usage: Usage;
+  source: ModelSource;
+  raw?: unknown;
+}
+
 export function modelRef(source: ModelSource, model: string): string {
   return `${source.provider}/${model}`;
 }
@@ -117,6 +155,11 @@ export type AIErrorKind =
 export type StreamEvent =
   | { type: 'start'; callId: string; provider: string; model: string }
   | { type: 'delta'; text: string }
+  // Reasoning/thinking tokens surfaced as their own channel so callers can show
+  // or discard them without them polluting `delta` (the user-facing answer).
+  // Emitted from Anthropic `thinking_delta` and OpenAI-compat `reasoning`/
+  // `reasoning_content` deltas; providers that don't stream reasoning never emit it.
+  | { type: 'reasoning'; text: string }
   | { type: 'tool_call'; call: ToolCall }
   | { type: 'context'; kind: string; data: unknown }
   | { type: 'retry'; attempt: number; reason: AIErrorKind; delayMs: number }
@@ -129,6 +172,7 @@ export interface ProviderAdapter {
   stream(conn: ResolvedConnection, req: ChatRequest): AsyncIterable<StreamEvent>;
   listModels?(conn: ResolvedConnection): Promise<ModelInfo[]>;
   health?(conn: ResolvedConnection): Promise<{ ok: boolean; detail?: string }>;
+  embed?(conn: ResolvedConnection, req: EmbedRequest): Promise<EmbedResult>;
 }
 
 export interface ModelInfo {
@@ -156,6 +200,15 @@ export interface CallInfo {
   provider: string;
   model: string;
   metadata?: Record<string, unknown>;
+  /**
+   * The fully resolved connection for this call — base URL defaulted from the
+   * provider profile and auth headers applied. Present whenever `beforeCall`
+   * runs after resolution (chat/stream and probes), letting a hook validate the
+   * *effective* endpoint (e.g. a request-time SSRF/DNS-rebinding re-check on the
+   * resolved `baseUrl`) without duplicating profile logic. The resolved
+   * `apiKey` is intentionally not exposed here.
+   */
+  resolved?: Omit<ResolvedConnection, 'apiKey'>;
 }
 
 export interface CallRecord {
@@ -172,4 +225,34 @@ export interface CallRecord {
   metadata?: Record<string, unknown>;
   promptChars: number;
   responseChars: number;
+  /**
+   * Estimated cost of this call in USD, computed by the optional `pricing` hook
+   * passed to the handler. Undefined when no pricing hook is configured or the
+   * hook returns nothing for this provider/model.
+   */
+  costUsd?: number;
+}
+
+/**
+ * Minimal [Standard Schema](https://standardschema.dev) validator surface. Any
+ * Zod / Valibot / ArkType schema (v1+) satisfies this via its `~standard`
+ * property, so `chatParsed` can validate model output against a schema the app
+ * already owns — with zero dependency added to this library.
+ */
+export interface StandardSchemaV1<Output = unknown> {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (value: unknown) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
+  };
+}
+
+export type StandardSchemaResult<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | { readonly issues: ReadonlyArray<{ readonly message: string; readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }> }> };
+
+/** Output of {@link AIHandler.chatParsed}: the validated value plus the raw chat result. */
+export interface ParsedResult<T> {
+  data: T;
+  result: ChatResult;
 }

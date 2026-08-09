@@ -1,7 +1,7 @@
 import { AIError, fromUnknown } from '../../errors.js';
 import { fetchJson, withTimeout } from '../../transport.js';
 import type { ModelInfo, ResolvedConnection } from '../../types.js';
-import { asRecord, asString } from '../../util.js';
+import { asRecord, asString, joinUrl } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
 
 export const DEFAULT_TIMEOUT_MS = 120_000;
@@ -17,14 +17,18 @@ export function streamError(error: unknown, timeout: { timedOut(): boolean }, pr
   return fromUnknown(error, provider);
 }
 
-/** Create a timeout/abort scope covering the full stream lifetime. */
+/**
+ * Create a timeout/abort scope covering the full stream lifetime, plus an
+ * optional idle timeout (`conn.idleTimeoutMs`) that the engine rearms via
+ * `bump()` on each received chunk.
+ */
 export function streamTimeout(conn: ResolvedConnection, signal?: AbortSignal): ReturnType<typeof withTimeout> {
-  return withTimeout(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal);
+  return withTimeout(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, signal, conn.idleTimeoutMs);
 }
 
 export async function listOpenModels(conn: ResolvedConnection, profile: ProviderProfile): Promise<ModelInfo[]> {
   if (!profile.listModelsPath) return [];
-  const { data } = await fetchJson(`${conn.baseUrl}${profile.listModelsPath}`, {
+  const { data } = await fetchJson(joinUrl(conn.baseUrl, profile.listModelsPath), {
     method: 'GET',
     headers: conn.headers,
     timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -54,7 +58,7 @@ export async function health(conn: ResolvedConnection, profile: ProviderProfile)
   const path = profile.healthPath ?? profile.listModelsPath;
   if (!path) return { ok: true };
   try {
-    await fetchJson(`${conn.baseUrl}${path}`, {
+    await fetchJson(joinUrl(conn.baseUrl, path), {
       method: 'GET',
       headers: conn.headers,
       timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),

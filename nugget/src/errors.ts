@@ -37,6 +37,10 @@ export function classify(status: number, body = '', provider?: string, headers?:
   const excerpt = body.slice(0, 200);
   const lower = body.toLowerCase();
   let kind: AIErrorKind = 'server';
+  // 403 is classified as `auth` (non-retryable) deliberately: a forbidden
+  // response almost always means a bad/insufficient credential or a blocked
+  // region/model, none of which a retry fixes. Callers that know a specific
+  // provider returns a retryable 403 can reclassify in a `beforeCall`/adapter.
   if (status === 401 || status === 403) kind = 'auth';
   else if (status === 408) kind = 'timeout';
   else if (status === 429) kind = 'rate_limit';
