@@ -140,6 +140,10 @@ export const PROVIDER_PROFILES: Record<string, ProviderProfile> = {
     // Unknown endpoint — usually pointed at a local/self-hosted server, so
     // assume the conservative local-runtime defaults rather than the hosted-cloud ones.
     capabilities: LOCAL_RUNTIME,
+    // Most servers reached through this escape hatch (JX Runtime and other
+    // local OpenAI-compatible runtimes) don't require a key at all; keep
+    // `auth: 'bearer'` for the ones that do (a key is only sent if provided).
+    quirks: { keyOptional: true },
   },
 };
 

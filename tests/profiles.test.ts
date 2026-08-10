@@ -55,6 +55,10 @@ describe('provider profiles', () => {
     expect(PROVIDER_PROFILES['anthropic']!.quirks?.maxTokensRequired).toBe(true);
   });
 
+  it('marks the openai-compat escape hatch as key-optional (most local runtimes need no key)', () => {
+    expect(PROVIDER_PROFILES['openai-compat']!.quirks?.keyOptional).toBe(true);
+  });
+
   it('carries an azure deployment URL template', () => {
     expect(PROVIDER_PROFILES['azure-openai']!.quirks?.urlTemplate).toContain('/openai/deployments/{model}/chat/completions');
     expect(PROVIDER_PROFILES['azure-openai']!.quirks?.urlTemplate).toContain('api-version=');
