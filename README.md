@@ -1,5 +1,7 @@
 # AI Nugget
 
+**Version 0.6.0** · [What's changed since 0.5.0](#whats-changed-since-050) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
 
@@ -111,6 +113,37 @@ new AIHandler({
   model↔tool loop over the full pipeline, streamed `AgentEvent`s, budgets with
   honest `stopReason`s, an `ApprovalGate` for side-effecting tools, and
   `native`/`promptJson`/`auto` tool modes.
+
+## What's changed since 0.5.0
+
+**0.6.0 is backward-compatible** — every change below is additive. The one thing
+to check is the new `not_found` error kind if you `switch` exhaustively over
+`AIErrorKind`; see [UPGRADING.md](./UPGRADING.md#05x--060). Full detail lives in
+the [changelog](./CHANGELOG.md).
+
+- **Security & correctness** — `beforeCall` hooks now receive a scrubbed
+  connection (masked literal `keyRef` and auth headers, safe to log);
+  `classify()` redacts provider response excerpts at the wire boundary so an
+  `AIError` can never carry an unredacted secret; label-anchored redaction
+  covers unprefixed secrets (Azure `api-key`, AWS keys, `client_secret`, session
+  tokens); a new `not_found` error kind distinguishes 404/410 from a malformed
+  request; and Ollama tool-call arguments coerce through the shared parser so a
+  llama.cpp-style backend sending JSON-as-string no longer fails.
+- **Observability** — `stream_anomaly` detection now fires on all four engines
+  (not just `openaiChat`); Google and Anthropic emit `json_mode_downgraded` when
+  a JSON mode is dropped for tools; `AIHandler` logs a startup notice when no
+  `GovernancePolicy` is configured; and OpenAI requests carry a stable
+  `Idempotency-Key` across retries to mitigate double-billing.
+- **Providers & types** — `openai-compat` is now `keyOptional`, matching the
+  other local-runtime profiles, so keyless servers (including JX Runtime) work
+  without a `keyRef`; `Connection.provider` is typed `KnownProvider | (string &
+  {})` for autocomplete and typo-catching with the escape hatch still open.
+- **Docs & examples** — `README.md` was trimmed to a front door with reference
+  material moved under [`docs/`](./docs/) (`providers`, `reliability`,
+  `security`, `agent-loop`, `recipes`, `integrations`, `distribution`), and
+  [`examples/integrations/`](./examples/integrations/) added five CI-verified
+  starters (Express, Next.js, Cloudflare Workers, local Ollama, ESM/CJS
+  packaging check).
 
 ## Contributing
 
