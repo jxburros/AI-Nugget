@@ -84,6 +84,7 @@ new AIHandler({
 | [integrations.md](./docs/integrations.md) | The host matrix CI runs (Node, Next.js, Workers, local runtime, packaging) |
 | [distribution.md](./docs/distribution.md) | Commands, live smoke tests, CI workflows, npm/GitHub Packages/vendored `nugget/`, bundler notes |
 | [design.md](./design.md) | The full contract |
+| [state-of-the-nugget.md](./docs/state-of-the-nugget.md) | Current health snapshot: architecture, safety and reliability posture, coverage gaps, what's next |
 | [UPGRADING.md](./UPGRADING.md) | Version-by-version changes |
 
 ## What's in the box
