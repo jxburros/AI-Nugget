@@ -82,6 +82,24 @@ so the `openaiChat` engine falls back to `POST {baseUrl}/chat/completions`
 e.g. `http://localhost:8080/v1`). This matters most when standing up a local
 mock or test server: it has to listen on that exact path.
 
+**Pointing at a [JX Runtime](https://github.com/jxburros/JX-Runtime) server.**
+JX Runtime serves an OpenAI-compatible API at `http://127.0.0.1:8712/v1` by
+default (`/v1/chat/completions`, `/v1/models`, streaming SSE with a `[DONE]`
+sentinel — no library changes needed). Connect through the `openai-compat`
+profile with the `/v1` suffix included in `baseUrl`:
+
+```ts
+connect({ provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' });
+```
+
+JX Runtime allows unauthenticated requests from the local machine, so
+`keyRef` can be omitted (`openai-compat` is `keyOptional`). Its error body is
+`{ error: { code, message, details } }` — no `type` field — which
+`classify()` handles fine since it only reads HTTP status and body text, not
+`error.type`. Note JX Runtime does not send CORS headers by default, so a
+browser-hosted caller needs JX Runtime's CORS config enabled for that origin;
+server-side callers are unaffected.
+
 Model identity is always `(source, model)` — `modelRef(source, model)` gives the
 canonical `provider/model` key so the same weights served by different hosts stay
 distinct and comparable.

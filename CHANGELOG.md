@@ -10,6 +10,21 @@ phased build in `development-plan.md`; entries note which phase they advance.
 - Added repo-specific QA instructions covering the required Node and browser
   contract suites, generated-artifact drift checks, security invariants, and
   honest skip conditions for optional live-provider checks.
+- Marked the `openai-compat` profile `keyOptional`, matching the other local
+  runtime profiles (`lmstudio`, `llamacpp`, `vllm`), since most servers reached
+  through this escape hatch — including JX Runtime — don't require a key.
+- Documented how to point `openai-compat` at a JX Runtime server (`baseUrl`,
+  auth, error-shape compatibility, CORS caveat for browser callers) in
+  README.md.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm run typecheck` and `npm test` both pass (129 passed, 6
+  skipped).
 
 ## 2026-08-09 - Claude
 
