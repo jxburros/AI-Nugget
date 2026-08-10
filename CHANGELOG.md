@@ -3,6 +3,29 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-08-10 - Claude — Secret Census integration report
+
+### Changed
+
+- Archived a consumer integration report: `docs/archive/2026-08-10-secret-census-integration-report.md`,
+  from migrating Secret Census's AI chat sidebar (three provider SDKs plus four
+  hand-rolled model-list fetches) onto `AIHandler`/`listModels()` via the
+  vendored `nugget/dist` path. No library-side blockers; friction was
+  documentation-shaped (five items, `FR-1`–`FR-5`) rather than a missing
+  capability, unlike the earlier AI Server Studio friction report.
+
+### Not completed
+
+- None. The report's suggestions (a `chatParsed` fallback-parser hook, two doc
+  additions to `providers.md`/`recipes.md`, self-identifying vendored output,
+  and an optional error→message map) are not yet implemented — filing as
+  follow-up issues was not requested.
+
+### Notes
+
+- Validation: docs-only change; no `src/` files touched, so `npm test` /
+  `npm run build` / `npm run build:nugget` are unaffected.
+
 ## 2026-08-10 - Claude — 0.6.0
 
 Cuts a release for the backward-compatible changes accumulated since 0.5.0: the
