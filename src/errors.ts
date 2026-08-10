@@ -1,4 +1,14 @@
+import { createDefaultRedactor } from './redact.js';
 import type { AIErrorKind } from './types.js';
+
+/**
+ * Pattern-based redaction applied at the wire boundary, before an error object
+ * exists. `AIHandler` redacts again on the way out (adding session-registered
+ * exact secrets), but doing it here means a provider body that echoes a
+ * recognizable secret can never be carried by an `AIError` in the first place —
+ * including on code paths that never reach the handler's own catch blocks.
+ */
+const wireRedactor = createDefaultRedactor();
 
 export class AIError extends Error {
   kind: AIErrorKind;
@@ -34,7 +44,7 @@ export function defaultRetryable(kind: AIErrorKind): boolean {
 }
 
 export function classify(status: number, body = '', provider?: string, headers?: Headers): AIError {
-  const excerpt = body.slice(0, 200);
+  const excerpt = wireRedactor.redact(body.slice(0, 200));
   const lower = body.toLowerCase();
   let kind: AIErrorKind = 'server';
   // 403 is classified as `auth` (non-retryable) deliberately: a forbidden
@@ -48,7 +58,17 @@ export function classify(status: number, body = '', provider?: string, headers?:
     kind = lower.includes('context') || lower.includes('maximum context') || lower.includes('token limit')
       ? 'context_length'
       : 'invalid_request';
+  } else if (status === 404 || status === 410) {
+    // A missing route/deployment is not a malformed request: it is usually a
+    // wrong baseUrl or model name, and sometimes a temporarily misrouted load
+    // balancer. `not_found` keeps it distinguishable from `invalid_request` so
+    // apps don't tell a user "your request was invalid" for an infra problem.
+    // Non-retryable by default — a caller that knows its 404s are transient can
+    // retry on `kind === 'not_found'` itself.
+    kind = 'not_found';
   } else if (status >= 500) kind = 'server';
+  // Everything else in 4xx (409 conflict, 405, 415, 451, …) is a genuine
+  // client-side request problem, so `invalid_request` is honest for it.
   else kind = 'invalid_request';
 
   return new AIError(`HTTP ${status}: ${excerpt}`, {

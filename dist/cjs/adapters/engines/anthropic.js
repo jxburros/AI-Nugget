@@ -32,11 +32,22 @@ class AnthropicAdapter {
         let inputTokens;
         let outputTokens;
         let stopReason;
+        let sawTerminal = false;
         const emittedTools = [];
         // Partial tool_use blocks keyed by content-block index (input_json_delta accumulation).
         const blocks = new Map();
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        // Anthropic JSON mode is implemented as a forced `json_output` tool, which
+        // cannot coexist with the caller's own tools — same silent-downgrade shape
+        // as Gemini, so it gets the same signal rather than quietly dropping.
+        if (req.responseFormat?.type === 'json' && req.tools?.length) {
+            yield {
+                type: 'context',
+                kind: 'json_mode_downgraded',
+                data: { reason: 'Anthropic JSON mode uses a forced tool and cannot be combined with caller tools; the request was sent without JSON mode', provider: conn.provider },
+            };
+        }
         try {
             const res = await (0, transport_js_1.postResponse)(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
             const contentType = res.headers.get('content-type') ?? '';
@@ -46,6 +57,7 @@ class AnthropicAdapter {
                 inputTokens = parsed.inputTokens;
                 outputTokens = parsed.outputTokens;
                 stopReason = parsed.stopReason;
+                sawTerminal = true;
                 if (jsonMode) {
                     text = jsonTextFrom(parsed.toolCalls, parsed.text);
                     if (text)
@@ -64,7 +76,7 @@ class AnthropicAdapter {
             else {
                 for await (const line of (0, transport_js_1.sseLines)(res)) {
                     timeout.bump();
-                    const record = (0, util_js_1.asRecord)(safeParse(line));
+                    const record = (0, util_js_1.asRecord)((0, base_js_1.safeParse)(line));
                     if (!record)
                         continue;
                     const type = (0, util_js_1.asString)(record.type);
@@ -77,7 +89,7 @@ class AnthropicAdapter {
                         const index = (0, util_js_1.asNumber)(record.index) ?? 0;
                         const block = (0, util_js_1.asRecord)(record.content_block);
                         if (block?.type === 'tool_use') {
-                            blocks.set(index, { id: (0, util_js_1.asString)(block.id) ?? randomId(), name: (0, util_js_1.asString)(block.name) ?? 'unknown', raw: '' });
+                            blocks.set(index, { id: (0, util_js_1.asString)(block.id) ?? (0, base_js_1.randomId)(), name: (0, util_js_1.asString)(block.name) ?? 'unknown', raw: '' });
                         }
                     }
                     else if (type === 'content_block_delta') {
@@ -108,7 +120,7 @@ class AnthropicAdapter {
                         const index = (0, util_js_1.asNumber)(record.index) ?? 0;
                         const partial = blocks.get(index);
                         if (partial) {
-                            const call = { id: partial.id, name: partial.name, raw: partial.raw, arguments: parseArgs(partial.raw) };
+                            const call = { id: partial.id, name: partial.name, raw: partial.raw, arguments: (0, base_js_1.parseArgs)(partial.raw) };
                             blocks.delete(index);
                             if (jsonMode && call.name === JSON_MODE_TOOL) {
                                 text = jsonTextFrom([call], text);
@@ -122,14 +134,21 @@ class AnthropicAdapter {
                             }
                         }
                     }
+                    else if (type === 'message_stop') {
+                        sawTerminal = true;
+                    }
                     else if (type === 'message_delta') {
                         const delta = (0, util_js_1.asRecord)(record.delta);
+                        if ((0, util_js_1.asString)(delta?.stop_reason))
+                            sawTerminal = true;
                         stopReason = (0, util_js_1.asString)(delta?.stop_reason) ?? stopReason;
                         const usage = (0, util_js_1.asRecord)(record.usage);
                         outputTokens = (0, util_js_1.asNumber)(usage?.output_tokens) ?? outputTokens;
                     }
                 }
             }
+            if (!sawTerminal)
+                yield (0, base_js_1.streamAnomaly)('stream ended without a stop_reason or message_stop');
             const hasTools = emittedTools.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -260,7 +279,7 @@ function parseResponse(data) {
             text += (0, util_js_1.asString)(block.text) ?? '';
         if (block?.type === 'tool_use') {
             toolCalls.push({
-                id: (0, util_js_1.asString)(block.id) ?? randomId(),
+                id: (0, util_js_1.asString)(block.id) ?? (0, base_js_1.randomId)(),
                 name: (0, util_js_1.asString)(block.name) ?? 'unknown',
                 arguments: block.input ?? {},
                 raw: JSON.stringify(block.input ?? {}),
@@ -286,23 +305,4 @@ function mapStop(stop, hasTools) {
     if (stop === 'max_tokens')
         return 'length';
     return 'stop';
-}
-function parseArgs(raw) {
-    try {
-        return raw ? JSON.parse(raw) : {};
-    }
-    catch {
-        return {};
-    }
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

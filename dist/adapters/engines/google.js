@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 export class GoogleAdapter {
     provider;
     constructor(provider) {
@@ -30,6 +30,16 @@ export class GoogleAdapter {
         const toolCalls = [];
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        // Gemini rejects `responseMimeType: application/json` combined with function
+        // declarations, so `body()` drops JSON mode when tools are present. Surface
+        // that downgrade instead of silently returning unstructured text.
+        if (jsonModeDowngraded(req)) {
+            yield {
+                type: 'context',
+                kind: 'json_mode_downgraded',
+                data: { reason: 'Gemini does not accept JSON response mode together with tools; the request was sent without JSON mode', provider: conn.provider },
+            };
+        }
         try {
             const streamUrl = `${conn.baseUrl}/v1beta/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
             const res = await postResponse(streamUrl, body(req), conn.headers, timeout.signal, conn.provider);
@@ -73,6 +83,8 @@ export class GoogleAdapter {
                 inputTokens = asNumber(usage?.promptTokenCount) ?? inputTokens;
                 outputTokens = asNumber(usage?.candidatesTokenCount) ?? outputTokens;
             }
+            if (!finish)
+                yield streamAnomaly('stream ended without a finishReason');
             const hasTools = toolCalls.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -142,6 +154,10 @@ export class GoogleAdapter {
         }
         return models;
     }
+}
+/** True when the caller asked for JSON mode but tools force it off. */
+function jsonModeDowngraded(req) {
+    return req.responseFormat?.type === 'json' && !!req.tools?.length;
 }
 function body(req) {
     const systemText = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n');
@@ -261,16 +277,5 @@ function mapFinish(finish, hasTools) {
     if (finish === 'SAFETY' || finish === 'RECITATION' || finish === 'BLOCKLIST' || finish === 'PROHIBITED_CONTENT')
         return 'content_filter';
     return 'stop';
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 //# sourceMappingURL=google.js.map

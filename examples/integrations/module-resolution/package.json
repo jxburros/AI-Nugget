@@ -1,0 +1,8 @@
+{
+  "name": "ai-nugget-integration-module-resolution",
+  "private": true,
+  "type": "module",
+  "description": "Proves the package's exports map resolves under both import and require",
+  "scripts": { "verify": "node verify.mjs" },
+  "dependencies": { "@jxburros/ai-nugget": "file:../../.." }
+}

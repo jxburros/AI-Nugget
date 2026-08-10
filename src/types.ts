@@ -1,3 +1,7 @@
+import type { KnownProvider } from './adapters/profiles.js';
+
+export type { KnownProvider };
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ContentPart {
@@ -57,7 +61,13 @@ export interface ChatRequest {
 
 export interface Connection {
   id: string;
-  provider: string;
+  /**
+   * A provider with a profile in the table, or any other string — an unknown
+   * key with a `baseUrl` resolves through the `openai-compat` escape hatch.
+   * The union is there for autocomplete and typo-catching; the `string & {}`
+   * arm keeps the escape hatch open.
+   */
+  provider: KnownProvider | (string & {});
   baseUrl?: string;
   keyRef?: KeyRef;
   timeoutMs?: number;
@@ -145,6 +155,8 @@ export type AIErrorKind =
   | 'server'
   | 'invalid_request'
   | 'invalid_response'
+  /** 404/410 — endpoint, deployment, or model not found (wrong baseUrl/model, or a misrouted edge). */
+  | 'not_found'
   | 'context_length'
   | 'canceled'
   | 'policy_blocked'

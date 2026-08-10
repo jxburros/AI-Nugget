@@ -1,0 +1,54 @@
+name: Integration matrix
+
+# The contract suite runs inside this repo against mocked `fetch`. That proves
+# behavior, not packaging: it cannot see a broken `exports` map, a bundler that
+# won't resolve the package, or a Node built-in sneaking into the import graph.
+# This workflow runs each starter in `examples/integrations/` inside its real
+# host toolchain, so those failures surface here instead of in a consumer's app.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  integrations:
+    name: ${{ matrix.starter }} (${{ matrix.host }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - starter: module-resolution
+            host: ESM + CJS entry points
+          - starter: express
+            host: Node server
+          - starter: ollama-desktop
+            host: local runtime, no key
+          - starter: workers
+            host: edge / workerd bundle
+          - starter: nextjs
+            host: Next.js App Router build
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Build the package the starters install
+        run: |
+          npm ci
+          npm run build
+      - name: Install starter
+        working-directory: examples/integrations/${{ matrix.starter }}
+        run: npm install --no-audit --no-fund
+      - name: Verify starter
+        working-directory: examples/integrations/${{ matrix.starter }}
+        env:
+          # Wrangler's dry-run needs no credentials; keep it from phoning home.
+          WRANGLER_SEND_METRICS: 'false'
+          NEXT_TELEMETRY_DISABLED: '1'
+        run: npm run verify

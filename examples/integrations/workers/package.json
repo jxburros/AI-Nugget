@@ -1,0 +1,16 @@
+{
+  "name": "ai-nugget-integration-workers",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Workers (edge) starter for @jxburros/ai-nugget",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "verify": "wrangler deploy --dry-run --outdir .wrangler-verify"
+  },
+  "dependencies": {
+    "@jxburros/ai-nugget": "file:../../.."
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
+  }
+}

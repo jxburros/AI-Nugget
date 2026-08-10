@@ -42,7 +42,7 @@ class OpenAIChatAdapter {
             if (!contentType.includes('text/event-stream')) {
                 // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
                 const rawText = await res.text().catch(() => '');
-                const raw = safeParse(rawText) ?? { text: rawText };
+                const raw = (0, base_js_1.safeParse)(rawText) ?? { text: rawText };
                 const parsed = parseOpenAiResponse(raw);
                 text = parsed.text;
                 toolCalls = parsed.toolCalls;
@@ -61,7 +61,7 @@ class OpenAIChatAdapter {
                 const partialTools = new Map();
                 for await (const line of (0, transport_js_1.sseLines)(res)) {
                     timeout.bump();
-                    const chunk = safeParse(line);
+                    const chunk = (0, base_js_1.safeParse)(line);
                     const record = (0, util_js_1.asRecord)(chunk);
                     if (!record)
                         continue;
@@ -99,17 +99,16 @@ class OpenAIChatAdapter {
                     }
                 }
                 toolCalls = [...partialTools.values()].filter((call) => call.name).map((call) => ({
-                    id: call.id ?? randomId(),
+                    id: call.id ?? (0, base_js_1.randomId)(),
                     name: call.name,
                     raw: call.raw,
-                    arguments: parseArgs(call.raw),
+                    arguments: (0, base_js_1.parseArgs)(call.raw),
                 }));
                 for (const call of toolCalls)
                     yield { type: 'tool_call', call };
             }
-            if (!sawTerminal) {
-                yield { type: 'context', kind: 'stream_anomaly', data: { reason: 'stream ended without a finish_reason' } };
-            }
+            if (!sawTerminal)
+                yield (0, base_js_1.streamAnomaly)('stream ended without a finish_reason');
             const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
             yield { type: 'done', result };
         }
@@ -231,7 +230,7 @@ function parseOpenAiResponse(raw) {
             const call = (0, util_js_1.asRecord)(value);
             const fn = (0, util_js_1.asRecord)(call?.function);
             const rawArgs = (0, util_js_1.asString)(fn?.arguments) ?? '{}';
-            return { id: (0, util_js_1.asString)(call?.id) ?? randomId(), name: (0, util_js_1.asString)(fn?.name) ?? 'unknown', raw: rawArgs, arguments: parseArgs(rawArgs) };
+            return { id: (0, util_js_1.asString)(call?.id) ?? (0, base_js_1.randomId)(), name: (0, util_js_1.asString)(fn?.name) ?? 'unknown', raw: rawArgs, arguments: (0, base_js_1.parseArgs)(rawArgs) };
         }),
         inputTokens: (0, util_js_1.asNumber)(usage?.prompt_tokens),
         outputTokens: (0, util_js_1.asNumber)(usage?.completion_tokens),
@@ -259,23 +258,4 @@ function mapFinish(finish, hasToolCalls) {
     if (finish === 'content_filter')
         return 'content_filter';
     return 'stop';
-}
-function parseArgs(raw) {
-    try {
-        return raw ? JSON.parse(raw) : {};
-    }
-    catch {
-        return {};
-    }
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

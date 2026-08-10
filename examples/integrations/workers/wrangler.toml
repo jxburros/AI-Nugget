@@ -1,0 +1,8 @@
+name = "ai-nugget-worker-starter"
+main = "worker.mjs"
+compatibility_date = "2025-01-01"
+
+# `npm run verify` runs `wrangler deploy --dry-run`, which bundles for workerd
+# with esbuild. That is the real check: the bundle fails if anything in the
+# import graph reaches for a Node built-in, so it proves the nugget core is
+# genuinely isomorphic rather than merely believed to be.

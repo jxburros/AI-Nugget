@@ -69,9 +69,49 @@ export async function health(conn, profile) {
         return { ok: false, detail: error instanceof Error ? error.message : 'Health check failed' };
     }
 }
-export function requireResponse(condition, message) {
-    if (!condition)
-        throw new AIError(message, { kind: 'invalid_response' });
+/**
+ * Coerce a provider's tool-call `arguments` into an object. Providers disagree
+ * on the shape: OpenAI/Anthropic stream a JSON *string*, Google and Ollama send
+ * a native object — but Ollama-compatible backends (llama.cpp and friends)
+ * sometimes send a string too. Malformed JSON degrades to `{}` so a single bad
+ * tool call surfaces as an argument-validation error rather than a stream crash.
+ */
+export function parseArgs(raw) {
+    if (raw === undefined || raw === null)
+        return {};
+    if (typeof raw !== 'string')
+        return raw;
+    if (!raw.trim())
+        return {};
+    try {
+        return JSON.parse(raw);
+    }
+    catch {
+        return {};
+    }
+}
+/** JSON.parse that returns undefined instead of throwing — for per-line stream frames. */
+export function safeParse(line) {
+    try {
+        return JSON.parse(line);
+    }
+    catch {
+        return undefined;
+    }
+}
+/** Stable-enough id for a tool call a provider didn't give one for. */
+export function randomId() {
+    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+/**
+ * A stream that ended without the provider's terminal marker (an OpenAI
+ * `finish_reason`, an Anthropic `message_delta.stop_reason`, a Google
+ * `finishReason`, an Ollama `done`) was almost certainly truncated. Every
+ * engine yields this so a dropped connection is diagnosable identically
+ * regardless of provider.
+ */
+export function streamAnomaly(reason = 'stream ended without a terminal finish reason') {
+    return { type: 'context', kind: 'stream_anomaly', data: { reason } };
 }
 /**
  * Pulls a context-window figure out of the many shapes providers use for it

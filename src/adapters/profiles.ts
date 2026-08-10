@@ -40,6 +40,14 @@ export interface ProviderProfile {
      * retired Azure api-version never requires a library release.
      */
     apiVersion?: string;
+    /**
+     * Provider honors an `Idempotency-Key` request header. When set, the handler
+     * attaches one key per logical call and reuses it across retries, so a retry
+     * after a connection drops post-generation is deduped by the provider rather
+     * than billed twice. Left off unless the provider documents the header —
+     * sending an unknown header is harmless, but claiming the guarantee is not.
+     */
+    supportsIdempotencyKey?: boolean;
   };
   listModelsPath?: string;
   healthPath?: string;
@@ -48,14 +56,40 @@ export interface ProviderProfile {
 const HOSTED_CLOUD: ProviderCapabilities = { nativeTools: true, jsonMode: true, local: false, embeddable: false };
 const LOCAL_RUNTIME: ProviderCapabilities = { nativeTools: false, jsonMode: false, local: true, embeddable: true };
 
-export const PROVIDER_PROFILES: Record<string, ProviderProfile> = {
+/**
+ * The provider keys that have a profile in {@link PROVIDER_PROFILES}. Used to
+ * type `Connection.provider` so IDEs autocomplete valid names and typos are a
+ * compile error rather than a silent fall-through to `openai-compat`.
+ */
+export type KnownProvider =
+  | 'openai'
+  | 'azure-openai'
+  | 'openrouter'
+  | 'groq'
+  | 'deepseek'
+  | 'mistral'
+  | 'together'
+  | 'fireworks'
+  | 'cerebras'
+  | 'moonshot'
+  | 'cohere'
+  | 'perplexity'
+  | 'lmstudio'
+  | 'llamacpp'
+  | 'vllm'
+  | 'ollama'
+  | 'anthropic'
+  | 'google'
+  | 'openai-compat';
+
+export const PROVIDER_PROFILES: Record<KnownProvider, ProviderProfile> & Record<string, ProviderProfile> = {
   openai: {
     engine: 'openaiChat',
     defaultBaseUrl: 'https://api.openai.com/v1',
     auth: 'bearer',
     listModelsPath: '/models',
     capabilities: HOSTED_CLOUD,
-    quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true },
+    quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, supportsIdempotencyKey: true },
   },
   'azure-openai': {
     engine: 'openaiChat',

@@ -33,6 +33,16 @@ class GoogleAdapter {
         const toolCalls = [];
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        // Gemini rejects `responseMimeType: application/json` combined with function
+        // declarations, so `body()` drops JSON mode when tools are present. Surface
+        // that downgrade instead of silently returning unstructured text.
+        if (jsonModeDowngraded(req)) {
+            yield {
+                type: 'context',
+                kind: 'json_mode_downgraded',
+                data: { reason: 'Gemini does not accept JSON response mode together with tools; the request was sent without JSON mode', provider: conn.provider },
+            };
+        }
         try {
             const streamUrl = `${conn.baseUrl}/v1beta/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
             const res = await (0, transport_js_1.postResponse)(streamUrl, body(req), conn.headers, timeout.signal, conn.provider);
@@ -40,7 +50,7 @@ class GoogleAdapter {
             const chunks = contentType.includes('text/event-stream') ? (0, transport_js_1.sseLines)(res) : singleJsonLine(res);
             for await (const line of chunks) {
                 timeout.bump();
-                const parsed = safeParse(line);
+                const parsed = (0, base_js_1.safeParse)(line);
                 const record = (0, util_js_1.asRecord)(parsed);
                 const promptFeedback = (0, util_js_1.asRecord)(record?.promptFeedback);
                 if (!firstCandidate(record) && promptFeedback?.blockReason)
@@ -62,7 +72,7 @@ class GoogleAdapter {
                     const fnCall = (0, util_js_1.asRecord)((0, util_js_1.asRecord)(part)?.functionCall);
                     if (fnCall) {
                         const call = {
-                            id: randomId(),
+                            id: (0, base_js_1.randomId)(),
                             name: (0, util_js_1.asString)(fnCall.name) ?? 'unknown',
                             arguments: fnCall.args ?? {},
                             raw: JSON.stringify(fnCall.args ?? {}),
@@ -76,6 +86,8 @@ class GoogleAdapter {
                 inputTokens = (0, util_js_1.asNumber)(usage?.promptTokenCount) ?? inputTokens;
                 outputTokens = (0, util_js_1.asNumber)(usage?.candidatesTokenCount) ?? outputTokens;
             }
+            if (!finish)
+                yield (0, base_js_1.streamAnomaly)('stream ended without a finishReason');
             const hasTools = toolCalls.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -147,6 +159,10 @@ class GoogleAdapter {
     }
 }
 exports.GoogleAdapter = GoogleAdapter;
+/** True when the caller asked for JSON mode but tools force it off. */
+function jsonModeDowngraded(req) {
+    return req.responseFormat?.type === 'json' && !!req.tools?.length;
+}
 function body(req) {
     const systemText = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n');
     const jsonMode = req.responseFormat?.type === 'json' && !req.tools?.length;
@@ -265,15 +281,4 @@ function mapFinish(finish, hasTools) {
     if (finish === 'SAFETY' || finish === 'RECITATION' || finish === 'BLOCKLIST' || finish === 'PROHIBITED_CONTENT')
         return 'content_filter';
     return 'stop';
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

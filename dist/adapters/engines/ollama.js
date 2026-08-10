@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, ndjsonLines, postResponse } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, mapWithConcurrency, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, parseArgs, randomId, streamAnomaly, streamError, streamTimeout } from './base.js';
 /** Max concurrent /api/show probes when listing models — enough to be fast, few enough to be polite to a local daemon. */
 const SHOW_CONCURRENCY = 6;
 export class OllamaAdapter {
@@ -29,6 +29,7 @@ export class OllamaAdapter {
         let inputTokens;
         let outputTokens;
         let doneReason;
+        let sawTerminal = false;
         const toolCalls = [];
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
@@ -51,6 +52,8 @@ export class OllamaAdapter {
                 inputTokens = asNumber(record?.prompt_eval_count) ?? inputTokens;
                 outputTokens = asNumber(record?.eval_count) ?? outputTokens;
                 doneReason = asString(record?.done_reason) ?? doneReason;
+                if (record?.done === true)
+                    sawTerminal = true;
                 const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
                 for (const callValue of calls) {
                     const fn = asRecord(asRecord(callValue)?.function);
@@ -58,13 +61,18 @@ export class OllamaAdapter {
                     const toolCall = {
                         id: randomId(),
                         name: asString(fn?.name) ?? 'unknown',
-                        arguments: args,
+                        // Ollama itself sends a native object, but llama.cpp-style backends
+                        // behind the same protocol send a JSON *string* — coerce either into
+                        // the object `validateToolArgs` expects.
+                        arguments: parseArgs(args),
                         raw: typeof args === 'string' ? args : JSON.stringify(args),
                     };
                     toolCalls.push(toolCall);
                     yield { type: 'tool_call', call: toolCall };
                 }
             }
+            if (!sawTerminal)
+                yield streamAnomaly('NDJSON stream ended without a done record');
             const hasTools = toolCalls.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -184,8 +192,5 @@ function toOllamaMessage(m) {
         message.tool_calls = m.toolCalls.map((call) => ({ function: { name: call.name, arguments: call.arguments ?? {} } }));
     }
     return message;
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 //# sourceMappingURL=ollama.js.map
