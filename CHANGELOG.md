@@ -3,6 +3,35 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-08-10 - Claude — 0.6.0
+
+Cuts a release for the backward-compatible changes accumulated since 0.5.0: the
+open-issue backlog closure (#45–#73), the `openai-compat` `keyOptional` /
+JX Runtime interop, and the docs restructure.
+
+### Changed
+
+- Bumped the package to `0.6.0` and regenerated `nugget/VERSION.txt`. The
+  release is additive; the only migration note is the new `not_found`
+  `AIErrorKind` member for exhaustive `switch` consumers (`UPGRADING.md`).
+- `README.md` now carries a version line and a "What's changed since 0.5.0"
+  section summarizing the security/correctness, observability, provider/type,
+  and docs changes, linking to `CHANGELOG.md` and `UPGRADING.md` for detail.
+- Renamed the `UPGRADING.md` migration heading from `0.5.x → next` to
+  `0.5.x → 0.6.0`.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm run build` (tsc), `npm test` (194 passed, 6 skipped live),
+  `npm run test:browser` (194 passed), and `npm run build:nugget` all pass. The
+  regenerated `nugget/VERSION.txt` content hash is unchanged from 0.5.0 — only
+  the version line moved — confirming no `src/`/`dist/` drift. This entry is a
+  version/docs cut over already-landed work.
+
 ## 2026-08-10 - Claude
 
 Closes the full open-issue backlog (#45–#73) from the product, persona, and

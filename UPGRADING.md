@@ -1,6 +1,6 @@
 # Upgrading
 
-## 0.5.x → next
+## 0.5.x → 0.6.0
 
 Behavior-compatible for ordinary consumers, with **two things worth checking**.
 
