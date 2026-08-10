@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, health, listOpenModels, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, health, listOpenModels, parseArgs, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 export class OpenAIChatAdapter {
     profile;
     provider;
@@ -104,9 +104,8 @@ export class OpenAIChatAdapter {
                 for (const call of toolCalls)
                     yield { type: 'tool_call', call };
             }
-            if (!sawTerminal) {
-                yield { type: 'context', kind: 'stream_anomaly', data: { reason: 'stream ended without a finish_reason' } };
-            }
+            if (!sawTerminal)
+                yield streamAnomaly('stream ended without a finish_reason');
             const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
             yield { type: 'done', result };
         }
@@ -255,24 +254,5 @@ function mapFinish(finish, hasToolCalls) {
     if (finish === 'content_filter')
         return 'content_filter';
     return 'stop';
-}
-function parseArgs(raw) {
-    try {
-        return raw ? JSON.parse(raw) : {};
-    }
-    catch {
-        return {};
-    }
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 //# sourceMappingURL=openaiChat.js.map

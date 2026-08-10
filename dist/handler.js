@@ -5,6 +5,16 @@ import { extractJson } from './json.js';
 import { allowAllPolicy } from './policy.js';
 import { SessionRedactor } from './redact.js';
 import { promptChars, sleep } from './util.js';
+/**
+ * A *startup* notice, so it fires once per process rather than once per handler
+ * — an app that builds a handler per request would otherwise flood its logs
+ * with a message that says the same thing every time.
+ */
+let warnedNoPolicy = false;
+/** Test seam: reset the once-per-process startup notice. */
+export function resetPolicyWarningForTests() {
+    warnedNoPolicy = false;
+}
 export class AIHandler {
     opts;
     active = 0;
@@ -15,6 +25,15 @@ export class AIHandler {
     constructor(opts) {
         this.opts = opts;
         this.policy = opts.policy ?? allowAllPolicy();
+        // `allowAllPolicy()` stays the default — a library must not decide an app's
+        // governance — but "no policy configured" should be visible at runtime, not
+        // only in a README paragraph. Passing an explicit policy (including
+        // `allowAllPolicy()`) is the opt-out.
+        if (!opts.policy && !opts.silencePolicyWarning && !warnedNoPolicy) {
+            warnedNoPolicy = true;
+            globalThis.console?.warn?.('[ai-nugget] No GovernancePolicy configured — every provider/model is allowed. ' +
+                'Pass `policy` (e.g. allowlistPolicy(...)), or `policy: allowAllPolicy()` / `silencePolicyWarning: true` to accept this deliberately.');
+        }
     }
     async chat(conn, req) {
         let result;
@@ -32,42 +51,13 @@ export class AIHandler {
         const callId = createCallId();
         const startedAt = Date.now();
         const adapter = adapterFor(conn.provider, conn.baseUrl);
-        const policyResult = this.policy.checkModel(conn.provider, req.model);
-        if (!policyResult.allowed) {
-            const error = new AIError(policyResult.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider });
-            await this.recordFailure(callId, conn, req, startedAt, 1, error);
-            yield { type: 'error', error: this.redactedError(error) };
-            return;
-        }
-        let resolved;
-        try {
-            resolved = await this.resolveConnection(conn);
-        }
-        catch (errorValue) {
-            // Key resolution failures (missing/locked/denied) are a recorded outcome,
-            // not an uncaught throw — the traceability contract covers them too.
-            const error = fromUnknown(errorValue, conn.provider);
-            await this.recordFailure(callId, conn, req, startedAt, 1, error);
-            yield { type: 'error', error: this.redactedError(error) };
-            return;
-        }
-        const info = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata, resolved: safeResolved(resolved) };
-        try {
-            if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
-                const error = new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
-                await this.recordFailure(callId, conn, req, startedAt, 1, error);
-                yield { type: 'error', error: this.redactedError(error) };
-                return;
-            }
-        }
-        catch (errorValue) {
-            // A throwing beforeCall hook is a recorded, redacted outcome too — not
-            // an uncaught throw that skips telemetry and the redaction guarantee.
-            const error = fromUnknown(errorValue, conn.provider);
-            await this.recordFailure(callId, conn, req, startedAt, 1, error);
-            yield { type: 'error', error: this.redactedError(error) };
-            return;
-        }
+        const preflight = await this.preflight(callId, conn, req.model, req.metadata);
+        if (!preflight.ok)
+            return yield* this.failStream(callId, conn, req, startedAt, 1, preflight.error);
+        // One idempotency key per logical call, reused across every retry attempt,
+        // so a provider that supports it collapses a re-sent generation instead of
+        // billing it twice (see `supportsIdempotencyKey` in the profile table).
+        const resolved = withIdempotencyKey(preflight.resolved, callId);
         let acquired = false;
         let recorded = false;
         let attempt = 0;
@@ -102,11 +92,11 @@ export class AIHandler {
                 }
                 catch (errorValue) {
                     const error = fromUnknown(errorValue, conn.provider);
+                    // `emittedOutput` stops retries once any byte has reached the caller:
+                    // never silently re-run a partially delivered answer.
                     if (!error.retryable || attempt >= maxAttempts || req.signal?.aborted || emittedOutput) {
-                        await this.recordFailure(callId, conn, req, startedAt, attempt, error);
                         recorded = true;
-                        yield { type: 'error', error: this.redactedError(error) };
-                        return;
+                        return yield* this.failStream(callId, conn, req, startedAt, attempt, error);
                     }
                     const delayMs = this.retryDelay(error, attempt);
                     yield { type: 'retry', attempt, reason: error.kind, delayMs };
@@ -114,21 +104,15 @@ export class AIHandler {
                         await sleep(delayMs, req.signal);
                     }
                     catch (sleepError) {
-                        const canceled = fromUnknown(sleepError, conn.provider);
-                        await this.recordFailure(callId, conn, req, startedAt, attempt, canceled);
                         recorded = true;
-                        yield { type: 'error', error: this.redactedError(canceled) };
-                        return;
+                        return yield* this.failStream(callId, conn, req, startedAt, attempt, fromUnknown(sleepError, conn.provider));
                     }
                 }
             }
         }
         catch (errorValue) {
-            const error = fromUnknown(errorValue, conn.provider);
-            await this.recordFailure(callId, conn, req, startedAt, Math.max(1, attempt), error);
             recorded = true;
-            yield { type: 'error', error: this.redactedError(error) };
-            return;
+            return yield* this.failStream(callId, conn, req, startedAt, Math.max(1, attempt), fromUnknown(errorValue, conn.provider));
         }
         finally {
             if (acquired)
@@ -137,6 +121,52 @@ export class AIHandler {
                 await this.recordFailure(callId, conn, req, startedAt, Math.max(1, attempt), new AIError('Call canceled before completion', { kind: 'canceled', retryable: false, provider: conn.provider }));
             }
         }
+    }
+    /**
+     * The shared pre-call preamble: policy check → key resolution → `beforeCall`
+     * hook. Every entry point (`stream`, `embed`, `listModels`/`testConnection`)
+     * runs exactly this sequence, so it lives once. Failures are *returned*, not
+     * recorded — each caller owns its own telemetry shape (`recordFailure` for
+     * chat/probe, `recordEmbed` for embeddings) and records the returned error.
+     */
+    async preflight(callId, conn, model, metadata) {
+        const policyResult = this.policy.checkModel(conn.provider, model);
+        if (!policyResult.allowed) {
+            return { ok: false, error: new AIError(policyResult.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider }) };
+        }
+        let resolved;
+        try {
+            resolved = await this.resolveConnection(conn);
+        }
+        catch (errorValue) {
+            // Key resolution failures (missing/locked/denied) are a recorded outcome,
+            // not an uncaught throw — the traceability contract covers them too.
+            return { ok: false, error: fromUnknown(errorValue, conn.provider) };
+        }
+        try {
+            const info = {
+                callId,
+                connection: safeConnection(conn),
+                provider: conn.provider,
+                model,
+                metadata,
+                resolved: safeResolved(resolved),
+            };
+            if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
+                return { ok: false, error: new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider }) };
+            }
+        }
+        catch (errorValue) {
+            // A throwing beforeCall hook is a recorded, redacted outcome too — not
+            // an uncaught throw that skips telemetry and the redaction guarantee.
+            return { ok: false, error: fromUnknown(errorValue, conn.provider) };
+        }
+        return { ok: true, resolved };
+    }
+    /** Record a failed call and emit the single redacted `error` event for it. */
+    async *failStream(callId, conn, req, startedAt, attempts, error) {
+        await this.recordFailure(callId, conn, req, startedAt, attempts, error);
+        yield { type: 'error', error: this.redactedError(error) };
     }
     async listModels(conn) {
         return this.runProbe(conn, '__listModels__', async (resolved) => {
@@ -218,28 +248,13 @@ export class AIHandler {
             await this.recordEmbed(callId, conn, req, startedAt, { estimated: true }, inputChars, error);
             throw this.redactedError(error);
         };
-        const policyResult = this.policy.checkModel(conn.provider, req.model);
-        if (!policyResult.allowed)
-            return fail(new AIError(policyResult.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider }));
-        let resolved;
-        try {
-            resolved = await this.resolveConnection(conn);
-        }
-        catch (errorValue) {
-            return fail(fromUnknown(errorValue, conn.provider));
-        }
+        const preflight = await this.preflight(callId, conn, req.model, req.metadata);
+        if (!preflight.ok)
+            return fail(preflight.error);
+        const resolved = preflight.resolved;
         const adapter = adapterFor(conn.provider, conn.baseUrl);
         if (!adapter.embed) {
             return fail(new AIError(`Provider ${conn.provider} does not support embeddings`, { kind: 'invalid_request', retryable: false, provider: conn.provider }));
-        }
-        try {
-            const info = { callId, connection: conn, provider: conn.provider, model: req.model, metadata: req.metadata, resolved: safeResolved(resolved) };
-            if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
-                return fail(new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider }));
-            }
-        }
-        catch (errorValue) {
-            return fail(fromUnknown(errorValue, conn.provider));
         }
         await this.acquire(req.signal);
         try {
@@ -277,19 +292,11 @@ export class AIHandler {
         const callId = createCallId();
         const startedAt = Date.now();
         const req = { model: operation, messages: [], metadata: { operation } };
-        const policyResult = this.policy.checkModel(conn.provider, operation);
-        if (!policyResult.allowed) {
-            const error = new AIError(policyResult.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider });
-            await this.recordFailure(callId, conn, req, startedAt, 1, error);
-            throw this.redactedError(error);
-        }
-        let resolved;
         try {
-            resolved = await this.resolveConnection(conn);
-            const info = { callId, connection: conn, provider: conn.provider, model: operation, metadata: req.metadata, resolved: safeResolved(resolved) };
-            if (await this.opts.hooks?.beforeCall?.(info) === 'deny') {
-                throw new AIError('Call denied by beforeCall hook', { kind: 'policy_blocked', retryable: false, provider: conn.provider });
-            }
+            const preflight = await this.preflight(callId, conn, operation, req.metadata);
+            if (!preflight.ok)
+                throw preflight.error;
+            const resolved = preflight.resolved;
             await this.acquire(undefined);
             try {
                 const value = await action(resolved);
@@ -485,10 +492,53 @@ function redactMetadata(metadata, redact) {
 function trimSlash(value) {
     return value.replace(/\/+$/, '');
 }
-/** Drops the resolved API key so a `beforeCall` hook can inspect the endpoint but never the secret. */
+/**
+ * Drops the resolved API key *and* neutralizes the auth headers built from it,
+ * so a `beforeCall` hook can inspect the endpoint but never the secret.
+ * `keyRef` is scrubbed too — a `{ kind: 'literal' }` ref carries the plaintext
+ * key, and hooks routinely log the whole object.
+ */
 function safeResolved(resolved) {
-    const { apiKey: _apiKey, ...rest } = resolved;
-    return rest;
+    const { apiKey: _apiKey, headers, ...rest } = resolved;
+    return { ...rest, ...safeKeyRef(resolved), headers: maskAuthHeaders(headers) };
+}
+/**
+ * The caller's own `Connection`, with any plaintext `keyRef` masked. Hooks get
+ * the connection so they can key off `id`/`provider`/`baseUrl`; they must never
+ * be handed the secret, since logging `info.connection` for audit is the
+ * obvious thing to do and would otherwise ship the key in clear text.
+ */
+function safeConnection(conn) {
+    return { ...conn, ...safeKeyRef(conn) };
+}
+function safeKeyRef(conn) {
+    if (conn.keyRef?.kind !== 'literal')
+        return conn.keyRef === undefined ? {} : { keyRef: conn.keyRef };
+    return { keyRef: { kind: 'literal', value: REDACTED } };
+}
+const REDACTED = '[REDACTED]';
+/** Header names whose value is derived from the API key by {@link applyAuth}. */
+const AUTH_HEADERS = new Set(['authorization', 'x-api-key', 'x-goog-api-key', 'api-key']);
+function maskAuthHeaders(headers) {
+    const masked = {};
+    for (const [name, value] of Object.entries(headers)) {
+        masked[name] = AUTH_HEADERS.has(name.toLowerCase()) ? REDACTED : value;
+    }
+    return masked;
+}
+/**
+ * Attach a per-call `Idempotency-Key` for providers that honor one, so a retry
+ * after a dropped connection can't be billed as a second generation. Only set
+ * where the profile declares support, and never overrides a caller-supplied
+ * header.
+ */
+function withIdempotencyKey(resolved, callId) {
+    const profile = profileFor(resolved.provider, resolved.baseUrl);
+    if (!profile.quirks?.supportsIdempotencyKey)
+        return resolved;
+    if (Object.keys(resolved.headers).some((name) => name.toLowerCase() === 'idempotency-key'))
+        return resolved;
+    return { ...resolved, headers: { ...resolved.headers, 'idempotency-key': callId } };
 }
 async function validateWithSchema(schema, text) {
     const value = extractJson(text);

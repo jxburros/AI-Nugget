@@ -1,5 +1,59 @@
 # Upgrading
 
+## 0.5.x → next
+
+Behavior-compatible for ordinary consumers, with **two things worth checking**.
+
+### 1. `not_found` is a new `AIErrorKind`
+
+404 and 410 responses now classify as `not_found` instead of
+`invalid_request`, so a wrong `baseUrl`/model or a misrouted edge is
+distinguishable from a malformed request body. It is non-retryable by default.
+
+- **If you `switch` exhaustively over `AIErrorKind`** (with a `never` default),
+  TypeScript will require a new branch. Map it like `auth`/`key_unavailable` —
+  it's a *server-side configuration* problem, not the caller's fault:
+
+  ```ts
+  case 'not_found': return { status: 502, message: 'The AI service is not configured correctly.' };
+  ```
+
+- **If you switch non-exhaustively** with a fallback, nothing breaks: a 404 that
+  used to produce "that request was invalid" now falls into your default branch
+  instead. That is the intended improvement, but check the resulting message
+  still reads correctly.
+
+### 2. A startup notice when no policy is configured
+
+`new AIHandler({ keySource })` with no `policy` now logs one line at
+construction: every provider and model is allowed. `allowAllPolicy()` is still
+the default — nothing is blocked. To silence it, say what you mean:
+
+```ts
+new AIHandler({ keySource, policy: allowAllPolicy() });        // deliberate, no warning
+new AIHandler({ keySource, silencePolicyWarning: true });      // same, if you prefer
+```
+
+### Also new, no action required
+
+- **`Connection.provider` is now typed** `KnownProvider | (string & {})`. You get
+  autocomplete and typo-catching; arbitrary strings still compile and still
+  resolve through `openai-compat`.
+- **`beforeCall` hooks get a scrubbed connection.** `info.connection.keyRef` is
+  masked for literal refs, and `info.resolved.headers` masks auth headers. If a
+  hook was reading `info.connection.keyRef.value` to get the key — don't; resolve
+  it through your `KeySource` instead.
+- **`Idempotency-Key` on OpenAI requests.** One key per logical call, reused
+  across retries. A header you set yourself on `Connection.headers` wins.
+- **New `context` stream events**: `json_mode_downgraded` (Google/Anthropic drop
+  JSON mode when tools are present) and `stream_anomaly` on all four engines
+  (previously `openaiChat` only). Both are informational; ignoring them keeps
+  the old behavior.
+- **Documentation moved.** `README.md` is now a front door; reference material
+  lives under `docs/` (`providers`, `reliability`, `security`, `agent-loop`,
+  `recipes`, `integrations`, `distribution`). Deep links into the old README
+  anchors will need updating.
+
 ## 0.4.x → 0.5.0
 
 **0.5.0 is backward-compatible.** Every change below is additive — new optional

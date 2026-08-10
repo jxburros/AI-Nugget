@@ -13,10 +13,23 @@ export interface HandlerOptions {
         baseDelayMs?: number;
         maxDelayMs?: number;
     };
+    /**
+     * Concurrency and pacing limits, enforced by an **in-memory queue on this
+     * handler instance only**. There is no shared/external coordination, so N
+     * instances behind a load balancer allow N × `maxConcurrent` in flight against
+     * the provider. Size these per instance, or put a shared limiter in front if a
+     * global ceiling matters.
+     */
     limits?: {
         maxConcurrent?: number;
         minIntervalMs?: number;
     };
+    /**
+     * Silence the one-time startup notice logged when no `policy` is supplied.
+     * Set this only when running unrestricted is a deliberate choice — passing an
+     * explicit `policy: allowAllPolicy()` says the same thing and is clearer.
+     */
+    silencePolicyWarning?: boolean;
     /**
      * Optional cost estimator. Called once per successful call/embedding with the
      * final usage; its return value (USD) is stored on the telemetry record's
@@ -29,6 +42,8 @@ export interface HandlerOptions {
         usage: Usage;
     }): number | undefined;
 }
+/** Test seam: reset the once-per-process startup notice. */
+export declare function resetPolicyWarningForTests(): void;
 export declare class AIHandler {
     private opts;
     private active;
@@ -39,6 +54,16 @@ export declare class AIHandler {
     constructor(opts: HandlerOptions);
     chat(conn: Connection, req: ChatRequest): Promise<ChatResult>;
     stream(conn: Connection, req: ChatRequest): AsyncIterable<StreamEvent>;
+    /**
+     * The shared pre-call preamble: policy check → key resolution → `beforeCall`
+     * hook. Every entry point (`stream`, `embed`, `listModels`/`testConnection`)
+     * runs exactly this sequence, so it lives once. Failures are *returned*, not
+     * recorded — each caller owns its own telemetry shape (`recordFailure` for
+     * chat/probe, `recordEmbed` for embeddings) and records the returned error.
+     */
+    private preflight;
+    /** Record a failed call and emit the single redacted `error` event for it. */
+    private failStream;
     listModels(conn: Connection): Promise<ModelInfo[]>;
     testConnection(conn: Connection): Promise<{
         ok: boolean;

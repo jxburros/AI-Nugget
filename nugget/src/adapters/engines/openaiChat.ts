@@ -4,7 +4,7 @@ import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, EmbedRequest, EmbedResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
-import { DEFAULT_TIMEOUT_MS, health, listOpenModels, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, health, listOpenModels, parseArgs, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 
 export class OpenAIChatAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -95,9 +95,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         }));
         for (const call of toolCalls) yield { type: 'tool_call', call };
       }
-      if (!sawTerminal) {
-        yield { type: 'context', kind: 'stream_anomaly', data: { reason: 'stream ended without a finish_reason' } };
-      }
+      if (!sawTerminal) yield streamAnomaly('stream ended without a finish_reason');
       const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
       yield { type: 'done', result };
     } catch (error) {
@@ -252,22 +250,3 @@ function mapFinish(finish: string | undefined, hasToolCalls: boolean): ChatResul
   return 'stop';
 }
 
-function parseArgs(raw: string): unknown {
-  try {
-    return raw ? JSON.parse(raw) as unknown : {};
-  } catch {
-    return {};
-  }
-}
-
-function safeParse(line: string): unknown {
-  try {
-    return JSON.parse(line) as unknown;
-  } catch {
-    return undefined;
-  }
-}
-
-function randomId(): string {
-  return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-}

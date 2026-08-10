@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, parseArgs, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 const JSON_MODE_TOOL = 'json_output';
 export class AnthropicAdapter {
     provider;
@@ -29,11 +29,22 @@ export class AnthropicAdapter {
         let inputTokens;
         let outputTokens;
         let stopReason;
+        let sawTerminal = false;
         const emittedTools = [];
         // Partial tool_use blocks keyed by content-block index (input_json_delta accumulation).
         const blocks = new Map();
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        // Anthropic JSON mode is implemented as a forced `json_output` tool, which
+        // cannot coexist with the caller's own tools — same silent-downgrade shape
+        // as Gemini, so it gets the same signal rather than quietly dropping.
+        if (req.responseFormat?.type === 'json' && req.tools?.length) {
+            yield {
+                type: 'context',
+                kind: 'json_mode_downgraded',
+                data: { reason: 'Anthropic JSON mode uses a forced tool and cannot be combined with caller tools; the request was sent without JSON mode', provider: conn.provider },
+            };
+        }
         try {
             const res = await postResponse(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
             const contentType = res.headers.get('content-type') ?? '';
@@ -43,6 +54,7 @@ export class AnthropicAdapter {
                 inputTokens = parsed.inputTokens;
                 outputTokens = parsed.outputTokens;
                 stopReason = parsed.stopReason;
+                sawTerminal = true;
                 if (jsonMode) {
                     text = jsonTextFrom(parsed.toolCalls, parsed.text);
                     if (text)
@@ -119,14 +131,21 @@ export class AnthropicAdapter {
                             }
                         }
                     }
+                    else if (type === 'message_stop') {
+                        sawTerminal = true;
+                    }
                     else if (type === 'message_delta') {
                         const delta = asRecord(record.delta);
+                        if (asString(delta?.stop_reason))
+                            sawTerminal = true;
                         stopReason = asString(delta?.stop_reason) ?? stopReason;
                         const usage = asRecord(record.usage);
                         outputTokens = asNumber(usage?.output_tokens) ?? outputTokens;
                     }
                 }
             }
+            if (!sawTerminal)
+                yield streamAnomaly('stream ended without a stop_reason or message_stop');
             const hasTools = emittedTools.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -282,24 +301,5 @@ function mapStop(stop, hasTools) {
     if (stop === 'max_tokens')
         return 'length';
     return 'stop';
-}
-function parseArgs(raw) {
-    try {
-        return raw ? JSON.parse(raw) : {};
-    }
-    catch {
-        return {};
-    }
-}
-function safeParse(line) {
-    try {
-        return JSON.parse(line);
-    }
-    catch {
-        return undefined;
-    }
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }
 //# sourceMappingURL=anthropic.js.map

@@ -12,7 +12,7 @@ exports.PROVIDER_PROFILES = {
         auth: 'bearer',
         listModelsPath: '/models',
         capabilities: HOSTED_CLOUD,
-        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true },
+        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, supportsIdempotencyKey: true },
     },
     'azure-openai': {
         engine: 'openaiChat',

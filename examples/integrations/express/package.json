@@ -1,0 +1,14 @@
+{
+  "name": "ai-nugget-integration-express",
+  "private": true,
+  "type": "module",
+  "description": "Express host starter for @jxburros/ai-nugget",
+  "scripts": {
+    "start": "node server.mjs",
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@jxburros/ai-nugget": "file:../../..",
+    "express": "^4.21.2"
+  }
+}

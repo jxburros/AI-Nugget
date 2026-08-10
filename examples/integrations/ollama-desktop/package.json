@@ -1,0 +1,13 @@
+{
+  "name": "ai-nugget-integration-ollama-desktop",
+  "private": true,
+  "type": "module",
+  "description": "Local-Ollama desktop starter for @jxburros/ai-nugget",
+  "scripts": {
+    "start": "node main.mjs",
+    "verify": "node verify.mjs"
+  },
+  "dependencies": {
+    "@jxburros/ai-nugget": "file:../../.."
+  }
+}

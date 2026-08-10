@@ -32,6 +32,7 @@ class OllamaAdapter {
         let inputTokens;
         let outputTokens;
         let doneReason;
+        let sawTerminal = false;
         const toolCalls = [];
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
@@ -54,20 +55,27 @@ class OllamaAdapter {
                 inputTokens = (0, util_js_1.asNumber)(record?.prompt_eval_count) ?? inputTokens;
                 outputTokens = (0, util_js_1.asNumber)(record?.eval_count) ?? outputTokens;
                 doneReason = (0, util_js_1.asString)(record?.done_reason) ?? doneReason;
+                if (record?.done === true)
+                    sawTerminal = true;
                 const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
                 for (const callValue of calls) {
                     const fn = (0, util_js_1.asRecord)((0, util_js_1.asRecord)(callValue)?.function);
                     const args = fn?.arguments ?? {};
                     const toolCall = {
-                        id: randomId(),
+                        id: (0, base_js_1.randomId)(),
                         name: (0, util_js_1.asString)(fn?.name) ?? 'unknown',
-                        arguments: args,
+                        // Ollama itself sends a native object, but llama.cpp-style backends
+                        // behind the same protocol send a JSON *string* — coerce either into
+                        // the object `validateToolArgs` expects.
+                        arguments: (0, base_js_1.parseArgs)(args),
                         raw: typeof args === 'string' ? args : JSON.stringify(args),
                     };
                     toolCalls.push(toolCall);
                     yield { type: 'tool_call', call: toolCall };
                 }
             }
+            if (!sawTerminal)
+                yield (0, base_js_1.streamAnomaly)('NDJSON stream ended without a done record');
             const hasTools = toolCalls.length > 0;
             yield { type: 'done', result: {
                     text,
@@ -188,7 +196,4 @@ function toOllamaMessage(m) {
         message.tool_calls = m.toolCalls.map((call) => ({ function: { name: call.name, arguments: call.arguments ?? {} } }));
     }
     return message;
-}
-function randomId() {
-    return globalThis.crypto?.randomUUID?.() ?? `tool_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 }

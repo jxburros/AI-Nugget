@@ -3,6 +3,127 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-08-10 - Claude
+
+Closes the full open-issue backlog (#45–#73) from the product, persona, and
+code reviews.
+
+### Changed
+
+**Security / correctness**
+
+- `beforeCall` hooks no longer receive a plaintext key. `info.connection.keyRef`
+  is masked for `{ kind: 'literal' }` refs, and `info.resolved` now also masks
+  the derived auth headers (`authorization`, `x-api-key`, `x-goog-api-key`,
+  `api-key`) in addition to dropping `apiKey`. Logging `info` for audit is now
+  safe. (#56)
+- `classify()` redacts the provider response excerpt at construction, at the
+  wire boundary, so an `AIError` can never carry an unredacted secret regardless
+  of which code path it propagates through. (#58)
+- Added label-anchored redaction patterns for unprefixed secrets (Azure
+  `api-key`, AWS secret access keys, `client_secret`, session tokens,
+  passwords), matching on the preceding label so commit SHAs and hashes are not
+  false-positived. Documented that exact-match `addSecret` remains the only
+  guaranteed catch for a bare unlabeled secret. (#57)
+- New `not_found` error kind for 404/410, so a wrong `baseUrl`/model or a
+  misrouted edge is distinguishable from a malformed request body. Other 4xx
+  fallthrough to `invalid_request` is now explicit and commented. (#67)
+- Ollama tool-call `arguments` are coerced through the shared `parseArgs`, so a
+  llama.cpp-style backend sending a JSON *string* no longer fails
+  `validateToolArgs` with a misleading "expected object arguments". (#68)
+
+**Observability**
+
+- Stream-anomaly detection now exists on all four engines, not just
+  `openaiChat`: a stream ending without its terminal marker (Anthropic
+  `stop_reason`/`message_stop`, Google `finishReason`, Ollama `done`) emits
+  `{ type: 'context', kind: 'stream_anomaly' }`. (#71)
+- Google and Anthropic emit a `json_mode_downgraded` context event when a
+  requested JSON mode is dropped because tools are also present, instead of
+  silently returning unstructured text. (#70)
+- `AIHandler` logs a one-line startup notice when no `GovernancePolicy` is
+  configured. `allowAllPolicy()` remains the default; pass an explicit policy or
+  `silencePolicyWarning: true` to opt out. (#52)
+- Providers whose profile declares `supportsIdempotencyKey` (currently `openai`)
+  receive an `Idempotency-Key` header holding the `callId`, stable across all
+  retries of one logical call, mitigating double-billing when a connection drops
+  after generation completes. A caller-supplied header is never overwritten. (#65)
+
+**Types and structure**
+
+- `Connection.provider` is typed `KnownProvider | (string & {})` — autocomplete
+  and typo-catching for the 19 profiled providers, with the `openai-compat`
+  escape hatch still open. (#60)
+- Extracted the shared policy → key-resolution → `beforeCall` preamble into one
+  `preflight()` used by `stream`, `embed`, and the probes; collapsed the
+  four-times-repeated failure triple in `stream()` into `failStream()`. (#64)
+- Moved `parseArgs` / `safeParse` / `randomId` (and the new `streamAnomaly`)
+  into `adapters/engines/base.ts` and imported them across all four engines. (#63)
+- Removed the never-called `requireResponse()` export from `base.ts`. (#69)
+
+**Tests**
+
+- `tests/redact-patterns.test.ts` — every pattern in `SECRET_PATTERNS` has a
+  representative sample, plus end-to-end proof that a non-`sk-` secret is
+  scrubbed from both a thrown error and a `CallRecord`, and that a literal
+  `keyRef` never reaches a `beforeCall` hook. (#72, #56)
+- `tests/transport.test.ts` grew from 3 tests to 19: total-timeout fire,
+  idle-timeout fire, idle rearm on `bump()`, post-`done()` quiescence,
+  `fetchJson` classification/`tolerantJson`/empty-body/timeout paths,
+  `postResponse` classification and transport-error normalization, malformed
+  NDJSON, and the no-`res.body` fallback. (#73)
+- `tests/issue-fixes.test.ts` covers the 4xx mapping, Ollama argument coercion,
+  anomaly parity across all four engines, the JSON-mode downgrade signal, the
+  policy warning, and idempotency-key stability across retries.
+
+**Documentation**
+
+- `README.md` cut from 471 to ~140 lines: a 15-line quick start above the fold
+  with the Node version requirement next to the install command, the two
+  must-configure production items, and a table pointing at the reference docs.
+  Nothing was dropped — reference material moved to `docs/`. (#45, #51, #62)
+- New `docs/providers.md` with a **verification-status matrix** labeling every
+  profile live-verified / live-verified-manual / mock-verified /
+  configuration-only. (#46)
+- New `docs/reliability.md`: `timeoutMs` vs `idleTimeoutMs`, why retries stop
+  once output is emitted, the double-billing window and idempotency, the
+  per-adapter timeout contract, and why limits are per-instance. (#53, #61, #65, #66)
+- New `docs/security.md`: SSRF via caller-controlled `baseUrl`, opt-in and
+  fail-open injection defenses, redaction coverage limits, and a three-step
+  secure-tool recipe showing re-validation inside `execute()`. (#47, #59)
+- New `docs/agent-loop.md` documenting exactly what happens to an in-flight tool
+  call at each budget boundary (`maxSteps`, `deadlineMs`, `maxTokens`). (#54)
+- New `docs/recipes.md`, `docs/distribution.md`, `docs/integrations.md`.
+- `AGENTS.md` gained a four-point **Feature Admission Test**; `CLAUDE.md` points
+  at it and at the new docs layout. (#48)
+- The `add-provider` skill documents the adapter timeout contract, the shared
+  `base.ts` helpers, and the requirement to file a new profile as
+  mock-verified. (#66)
+
+### Added
+
+- `examples/integrations/` — five installable starters: Express, Next.js App
+  Router, Cloudflare Workers, local Ollama, and an ESM/CJS packaging check. Each
+  installs the nugget through its real `exports` map and ships a `verify` script;
+  three run hermetically against a bundled mock provider. (#49)
+- `.github/workflows/integrations.yml` runs all five on every push and PR, so
+  packaging and host-runtime friction surfaces in CI rather than in a consumer's
+  app. `wrangler deploy --dry-run` is now the real isomorphism proof: the workerd
+  bundle fails on any Node built-in. (#50)
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm run typecheck`, `npm test`, `npm run test:browser`,
+  `npm run build`, `npm run build:nugget`, `npm run lint`, and all five
+  integration starters' `verify` scripts were run locally and pass.
+- `not_found` is an additive member of the `AIErrorKind` union. Exhaustive
+  `switch` statements over `AIErrorKind` in consuming apps will need a branch;
+  see `UPGRADING.md`.
+
 ## Unreleased
 
 ### Changed

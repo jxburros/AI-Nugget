@@ -1,0 +1,20 @@
+{
+  "name": "ai-nugget-integration-nextjs",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "verify": "next build"
+  },
+  "dependencies": {
+    "@jxburros/ai-nugget": "file:../../..",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.8.3"
+  }
+}
