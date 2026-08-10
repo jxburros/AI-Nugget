@@ -126,10 +126,19 @@ connect({ provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' });
 JX Runtime allows unauthenticated requests from the local machine, so `keyRef`
 can be omitted (`openai-compat` is `keyOptional`). Its error body is
 `{ error: { code, message, details } }` — no `type` field — which `classify()`
-handles fine since it only reads HTTP status and body text, not `error.type`.
-Note JX Runtime does not send CORS headers by default, so a browser-hosted
-caller needs JX Runtime's CORS config enabled for that origin; server-side
-callers are unaffected.
+handles fine since it only reads HTTP status and body text, not `error.type`;
+`error.code` and `error.details` (including a `BACKEND_UNAVAILABLE`/model-fit
+guided-repair plan) are lifted onto the resulting `AIError` — see
+[recipes.md](./recipes.md#errorcode-and-errordetails). Note JX Runtime does not
+send CORS headers by default, so a browser-hosted caller needs JX Runtime's
+CORS config enabled for that origin; server-side callers are unaffected.
+
+JX Runtime's `GET /v1/models` carries a `capabilities` object per model
+(`{ chat, completion, tools, structured_output, max_context, ... }` — see
+[JX's compatibility doc](https://github.com/jxburros/JX-Runtime/blob/main/docs/compatibility.md#the-capabilities-extension)),
+not the string/string-array shape most providers use. `listModels()` flattens
+it into `ModelInfo.capabilities` (the flag names that are `true`) and reads
+`ModelInfo.contextWindow` from its nested `max_context`.
 
 **Grok/xAI is not blocked and is never officially integrated** — point
 `openai-compat` at any endpoint if you must; that is your configuration, not a

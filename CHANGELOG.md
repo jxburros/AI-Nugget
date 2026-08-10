@@ -5,6 +5,44 @@ phased build in `development-plan.md`; entries note which phase they advance.
 
 ## 2026-08-10 - Claude
 
+Closes two JX Runtime interop gaps found while auditing AI-Nugget/JX-Runtime
+compatibility: `listModels()` was silently dropping JX Runtime's model
+metadata, and `AIError` had no structured access to a provider's `error.code`/
+`error.details` (notably JX Runtime's guided-repair plan).
+
+### Changed
+
+- `listModels()` now understands a `capabilities` field shaped as an object of
+  boolean flags (`{ chat: true, tools: false, max_context: 8192, ... }`, JX
+  Runtime's `GET /v1/models` shape) in addition to the existing string/
+  string-array shape: it's flattened into `ModelInfo.capabilities` (the flag
+  names that are `true`), and `max_context` is read into `ModelInfo.contextWindow`
+  when no top-level `context_length`/`context_window`/`contextWindow` is
+  present. Previously both came back `undefined` for any `openaiChat`-engine
+  provider using this shape.
+- `classify()` now lifts `code` and `details` from a `{ error: { code, details } }`
+  JSON body onto the resulting `AIError` (new optional `AIError.code`/`.details`
+  fields), redacted the same way `raw` is — both at the wire boundary and again
+  on the handler's way out to the caller. Lets an app act on a structured error
+  (e.g. JX Runtime's `error.details.repair.actions`) without re-parsing `raw`
+  itself. Bodies over 20,000 chars are not parsed for this (degrades to `raw`
+  only); `raw`'s truncation cap grew from 200 to 2,000 chars to comfortably
+  carry a small structured payload without ballooning every error.
+
+### Not completed
+
+- None.
+
+### Notes
+
+- Validation: `npm test`, `npm run test:browser`, `npm run build`,
+  `npm run build:nugget`, and `npm run lint` were run locally and pass.
+- `AIError.code`/`.details` are additive optional fields — no existing contract
+  changed. `ModelInfo.capabilities`/`.contextWindow` keep their existing types;
+  only what populates them for object-shaped `capabilities` changed.
+
+## 2026-08-10 - Claude
+
 Closes the full open-issue backlog (#45–#73) from the product, persona, and
 code reviews.
 

@@ -456,6 +456,8 @@ class AIHandler {
             retryable: error.retryable,
             provider: error.provider,
             raw: error.raw === undefined ? undefined : this.redact(error.raw),
+            code: error.code === undefined ? undefined : this.redact(error.code),
+            details: error.details === undefined ? undefined : redactDeep(error.details, (text) => this.redact(text)),
             retryAfterMs: error.retryAfterMs,
             cause: this.redactedCause(error.cause),
         });
@@ -493,6 +495,24 @@ function redactMetadata(metadata, redact) {
     catch {
         return { redacted: true, note: 'metadata was not JSON-serializable' };
     }
+}
+/**
+ * Session-secret redaction for `AIError.details` — an arbitrary provider-shaped
+ * JSON value (e.g. JX Runtime's guided-repair plan), not a string, so the
+ * text-based `redact()` pass has to walk into it rather than run on it
+ * directly. `classify()` already redacted the body this came from before
+ * parsing; this is the defense-in-depth pass for session-registered secrets
+ * (a resolved API key) that only exist after the handler resolved a key.
+ */
+function redactDeep(value, redact) {
+    if (typeof value === 'string')
+        return redact(value);
+    if (Array.isArray(value))
+        return value.map((entry) => redactDeep(entry, redact));
+    if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, redactDeep(entry, redact)]));
+    }
+    return value;
 }
 function trimSlash(value) {
     return value.replace(/\/+$/, '');

@@ -70,6 +70,32 @@ describe('AIHandler pipeline', () => {
     expect(last.error.cause.message).not.toContain('sk-abcdefghijklmnopqrstuvwxyz');
   });
 
+  it('surfaces a structured error code/details (e.g. JX Runtime guided repair) through to the caller', async () => {
+    mockFetch(jsonResponse({
+      error: {
+        code: 'BACKEND_UNAVAILABLE',
+        message: 'The llama-server binary was not found.',
+        details: { repair: { summary: 'No usable inference engine.', actions: [{ id: 'install-backend', method: 'POST', path: '/runtime/backend/install', permission: 'admin' }] } },
+      },
+    }, 503));
+    const handler = new AIHandler({ keySource: memoryKeySource({}), retry: { maxAttempts: 1 } });
+    await expect(handler.chat(openaiConn({ provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' }), req)).rejects.toMatchObject({
+      code: 'BACKEND_UNAVAILABLE',
+      details: { repair: { summary: 'No usable inference engine.', actions: [{ id: 'install-backend', method: 'POST', path: '/runtime/backend/install', permission: 'admin' }] } },
+    });
+  });
+
+  it('redacts a session-registered secret nested inside error.details, not just error.message', async () => {
+    // An opaque literal key with no recognizable prefix: only exact-match
+    // session registration (not the wire-boundary pattern redactor) catches it,
+    // so this specifically exercises the handler's redactDeep() pass on `details`.
+    mockFetch(jsonResponse({ error: { code: 'X', message: 'boom', details: { hint: 'opaque-session-secret-999 leaked here' } } }, 500));
+    const handler = new AIHandler({ keySource: memoryKeySource({}), retry: { maxAttempts: 1 } });
+    await expect(handler.chat(openaiConn({ keyRef: { kind: 'literal', value: 'opaque-session-secret-999' } }), req)).rejects.toMatchObject({
+      details: { hint: expect.not.stringContaining('opaque-session-secret-999') },
+    });
+  });
+
   it('honors Retry-After over the exponential backoff base', async () => {
     mockFetch(
       textResponse('rate limited', 429, { 'retry-after': '0' }),
@@ -268,6 +294,23 @@ describe('AIHandler pipeline', () => {
     expect(models[0]).toEqual({ id: 'gpt-x', source: { provider: 'openai', connectionId: 'c1', baseUrl: 'https://api.openai.com/v1' } });
     expect(records).toHaveLength(1);
     expect(records[0]?.model).toBe('__listModels__');
+  });
+
+  it('flattens a JX Runtime-style object `capabilities` field and reads contextWindow from its nested max_context', async () => {
+    mockFetch(jsonResponse({
+      data: [{
+        id: 'llama-3-8b-instruct',
+        object: 'model',
+        owned_by: 'jx-runtime',
+        capabilities: { chat: true, completion: true, embeddings: false, vision: false, tools: false, structured_output: true, max_context: 8192 },
+      }],
+    }));
+    const handler = new AIHandler({ keySource: memoryKeySource({}) });
+    const models = await handler.listModels(openaiConn({ provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' }));
+    expect(models[0]?.contextWindow).toBe(8192);
+    expect(models[0]?.capabilities).toEqual(expect.arrayContaining(['chat', 'completion', 'structured_output']));
+    expect(models[0]?.capabilities).not.toContain('embeddings');
+    expect(models[0]?.capabilities).not.toContain('tools');
   });
 
   it('applies policy and beforeCall hooks to model probes', async () => {

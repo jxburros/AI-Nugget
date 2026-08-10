@@ -53,6 +53,14 @@ new AIHandler({ keySource, silencePolicyWarning: true });      // same, if you p
   lives under `docs/` (`providers`, `reliability`, `security`, `agent-loop`,
   `recipes`, `integrations`, `distribution`). Deep links into the old README
   anchors will need updating.
+- **`AIError.raw` grew from 200 to 2,000 chars**, and gained two new optional
+  siblings, `AIError.code` and `AIError.details`, lifted from a JSON
+  `{ error: { code, details } }` body (see
+  [recipes.md](./docs/recipes.md#errorcode-and-errordetails)). If you have a
+  test asserting `error.raw.length === 200`, update it. `listModels()` also now
+  reads an object-shaped `capabilities` field (`{ chat: true, max_context: 8192, ... }`,
+  as JX Runtime returns) into `ModelInfo.capabilities`/`.contextWindow`, where it
+  previously came back `undefined`.
 
 ## 0.4.x → 0.5.0
 

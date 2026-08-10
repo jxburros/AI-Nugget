@@ -17,12 +17,37 @@ describe('classify(status, body)', () => {
     expect(classify(422, 'unprocessable')).toMatchObject({ kind: 'invalid_request' });
   });
 
-  it('parses Retry-After seconds and truncates the raw body to 200 chars', () => {
+  it('parses Retry-After seconds and truncates the raw body to 2000 chars', () => {
     const headers = new Headers({ 'retry-after': '3' });
-    const error = classify(429, 'x'.repeat(500), 'openai', headers);
+    const error = classify(429, 'x'.repeat(3000), 'openai', headers);
     expect(error.retryAfterMs).toBe(3000);
-    expect(error.raw?.length).toBe(200);
+    expect(error.raw?.length).toBe(2000);
     expect(error.provider).toBe('openai');
+  });
+
+  it('extracts code and details from a structured { error: { code, details } } body', () => {
+    const body = JSON.stringify({
+      error: {
+        code: 'MODEL_NOT_FOUND',
+        message: "No model with id 'x' is registered.",
+        details: { repair: { summary: 'No usable inference engine.', actions: [{ id: 'install-backend', method: 'POST', path: '/runtime/backend/install' }] } },
+      },
+    });
+    const error = classify(404, body, 'openai-compat');
+    expect(error.code).toBe('MODEL_NOT_FOUND');
+    expect(error.details).toEqual({ repair: { summary: 'No usable inference engine.', actions: [{ id: 'install-backend', method: 'POST', path: '/runtime/backend/install' }] } });
+  });
+
+  it('leaves code and details undefined for a plain-text or codeless body', () => {
+    expect(classify(500, 'internal server error').code).toBeUndefined();
+    expect(classify(500, 'internal server error').details).toBeUndefined();
+    expect(classify(400, JSON.stringify({ error: { message: 'bad request' } })).code).toBeUndefined();
+  });
+
+  it('does not attempt to parse an oversized body for code/details', () => {
+    const error = classify(500, JSON.stringify({ error: { code: 'X', details: 'y'.repeat(25_000) } }));
+    expect(error.code).toBeUndefined();
+    expect(error.details).toBeUndefined();
   });
 });
 

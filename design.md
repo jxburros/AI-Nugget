@@ -208,7 +208,9 @@ export class AIError extends Error {
   status?: number;                // HTTP status when applicable
   retryable: boolean;             // rate_limit, timeout, network, server → true
   provider?: string;
-  raw?: string;                   // first 200 chars of body, pre-redacted
+  raw?: string;                   // first 2000 chars of body, pre-redacted
+  code?: string;                  // error.code from a structured JSON body, when present
+  details?: unknown;              // error.details from a structured JSON body, when present (redacted, provider-shaped)
 }
 
 // ---------- the adapter seam ----------

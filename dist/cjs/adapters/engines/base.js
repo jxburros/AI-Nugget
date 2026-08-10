@@ -127,14 +127,27 @@ function streamAnomaly(reason = 'stream ended without a terminal finish reason')
 /**
  * Pulls a context-window figure out of the many shapes providers use for it
  * (OpenRouter `context_length`, OpenAI-style `context_window`, Ollama
- * `/api/show` `model_info` entries surfaced as `contextWindow`).
+ * `/api/show` `model_info` entries surfaced as `contextWindow`, JX Runtime's
+ * `capabilities.max_context`).
  */
 function asContextWindow(row) {
     if (!row)
         return undefined;
     const direct = row['context_length'] ?? row['context_window'] ?? row['contextWindow'];
-    return typeof direct === 'number' && Number.isFinite(direct) ? direct : undefined;
+    if (typeof direct === 'number' && Number.isFinite(direct))
+        return direct;
+    const nested = (0, util_js_1.asRecord)(row['capabilities'])?.['max_context'];
+    return typeof nested === 'number' && Number.isFinite(nested) ? nested : undefined;
 }
+/**
+ * `capabilities` on a listed model comes in two shapes across providers: an
+ * array/single string of capability names, or — JX Runtime's `GET /v1/models`
+ * (`{ chat: true, tools: false, max_context: 8192, ... }`) — an object of
+ * capability flags. The object form is flattened to the names whose flag is
+ * `true`; non-boolean fields (`max_context`) are read separately by
+ * {@link asContextWindow} and dropped here rather than surfacing as a bogus
+ * capability name.
+ */
 function asCapabilities(row) {
     if (!row)
         return undefined;
@@ -143,5 +156,10 @@ function asCapabilities(row) {
         return value;
     if (typeof value === 'string')
         return [value];
+    const record = (0, util_js_1.asRecord)(value);
+    if (record) {
+        const flags = Object.entries(record).filter(([, flag]) => flag === true).map(([name]) => name);
+        return flags.length ? flags : undefined;
+    }
     return undefined;
 }

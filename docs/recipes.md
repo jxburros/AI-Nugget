@@ -102,6 +102,33 @@ forward it to the client:
 the distinction matters for who should act on the error.
 `examples/npm-mini-apps/*/ai-error-map.mjs` is a copyable implementation.
 
+### `error.code` and `error.details`
+
+When a provider's response body is JSON shaped like `{ error: { code, details } }`
+(OpenAI, Anthropic, and self-hosted runtimes like [JX Runtime](https://github.com/jxburros/JX-Runtime)
+all do this), `classify()` lifts `code` and `details` onto the `AIError` —
+`error.code` is a stable machine-readable string, `error.details` is whatever
+provider-shaped object came with it. Both are `undefined` for a plain-text body
+or one with no `error.code`/`error.details`. This is what lets an app act on
+JX Runtime's guided-repair plan (`error.details.repair.actions`, one already
+filled in as a request an "Install" button can fire) instead of re-parsing
+`error.raw` itself:
+
+```ts
+try {
+  await handler.chat(conn, req);
+} catch (e) {
+  const error = e as AIError;
+  const repair = (error.details as { repair?: { summary: string; actions: unknown[] } } | undefined)?.repair;
+  if (repair) offerRepairUi(repair); // e.g. a button per repair.actions[i]
+}
+```
+
+Both fields are redacted the same way `raw` is (wire-boundary pattern redaction,
+then the handler's own session-secret pass on the way out) — but they're still
+provider-shaped, not part of this library's stable contract, so treat unknown
+keys as optional and validate before acting on them.
+
 ## Telemetry
 
 Every call — success, failure, or a stream the consumer abandoned — produces
