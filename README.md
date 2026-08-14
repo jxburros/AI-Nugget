@@ -177,3 +177,9 @@ seam), and not a UI. The governance seam ships neutral: it is where an app *can*
 enforce rules, not a place the library imposes its own.
 
 <!-- GitHub Pages deployment is configured in .github/workflows/pages.yml. -->
+
+---
+
+## Project Stewardship
+
+This project is developed by **Jeffrey** through **JX Holdings, LLC**. GitHub: [`jxburros`](https://github.com/jxburros).
