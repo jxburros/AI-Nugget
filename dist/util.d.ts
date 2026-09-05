@@ -21,4 +21,11 @@ export declare function joinUrl(base: string, path: string): string;
  */
 export declare function mapWithConcurrency<T, R>(items: readonly T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]>;
 export declare function sleep(ms: number, signal?: AbortSignal): Promise<void>;
+/**
+ * Token budgets behind the {@link ReasoningEffort} tiers for providers that
+ * express effort as a thinking-token budget (Anthropic `budget_tokens`, Google
+ * `thinkingBudget`). `'none'` is 0. Deliberately conservative: they are floors
+ * a model may stop under, not ceilings it fills.
+ */
+export declare const REASONING_BUDGET_TOKENS: Record<'none' | 'minimal' | 'low' | 'medium' | 'high', number>;
 //# sourceMappingURL=util.d.ts.map

@@ -1,5 +1,5 @@
 import type { AIHandler } from '../handler.js';
-import type { AIErrorKind, ChatMessage, Connection, StreamEvent, ToolCall, Usage } from '../types.js';
+import type { AIErrorKind, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
 import type { ToolSpec } from './tools.js';
 export interface AgentOptions {
     handler: AIHandler;
@@ -30,6 +30,8 @@ export interface AgentOptions {
     maxTokens?: number;
     topP?: number;
     stopSequences?: string[];
+    /** Reasoning effort forwarded to every turn — see {@link ChatRequest.reasoningEffort}. */
+    reasoningEffort?: ReasoningEffort;
     /** Provider-native passthrough forwarded to every turn — see {@link ChatRequest.providerOptions}. */
     providerOptions?: Record<string, unknown>;
     budget?: {

@@ -214,6 +214,24 @@ function body(req, jsonMode) {
         else if (req.toolChoice === 'none')
             base.tool_choice = { type: 'none' };
     }
+    if (req.reasoningEffort !== undefined) {
+        // First-class reasoning effort → extended thinking. Anthropic requires
+        // `budget_tokens < max_tokens` and rejects temperature/top_p alongside
+        // thinking, so the budget is fitted under max_tokens (raising max_tokens
+        // when the caller's value leaves no room) and the samplers are dropped.
+        if (req.reasoningEffort === 'none') {
+            base.thinking = { type: 'disabled' };
+        }
+        else {
+            const budget = util_js_1.REASONING_BUDGET_TOKENS[req.reasoningEffort];
+            const maxTokens = typeof base.max_tokens === 'number' ? base.max_tokens : 4096;
+            if (maxTokens <= budget)
+                base.max_tokens = budget + 1024;
+            base.thinking = { type: 'enabled', budget_tokens: budget };
+            delete base.temperature;
+            delete base.top_p;
+        }
+    }
     // providerOptions carries Anthropic-native fields (`thinking`, `metadata`,
     // top-level `cache_control` extras, `service_tier`, …) without a release.
     return (0, util_js_1.applyProviderOptions)(base, req.providerOptions);

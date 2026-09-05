@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
+import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import { DEFAULT_TIMEOUT_MS, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 
 export class GoogleAdapter implements ProviderAdapter {
@@ -177,6 +177,13 @@ function body(req: ChatRequest): Record<string, unknown> {
     const config: Record<string, unknown> = { mode };
     if (typeof req.toolChoice === 'object') config.allowedFunctionNames = [req.toolChoice.name];
     payload.toolConfig = { functionCallingConfig: config };
+  }
+  if (req.reasoningEffort !== undefined) {
+    // First-class reasoning effort → Gemini's thinking budget. 0 disables
+    // thinking on models that allow it; others treat it as a minimum.
+    (payload.generationConfig as Record<string, unknown>).thinkingConfig = {
+      thinkingBudget: REASONING_BUDGET_TOKENS[req.reasoningEffort],
+    };
   }
   // providerOptions reaches Google-native fields: top-level `safetySettings`,
   // `cachedContent`, and `generationConfig` extras (`thinkingConfig`,

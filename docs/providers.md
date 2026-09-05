@@ -95,6 +95,56 @@ for await (const event of handler.stream(conn, req)) {
 }
 ```
 
+## Inline reasoning is stripped at the seam
+
+Every engine already routes a provider's *dedicated* reasoning field (Anthropic
+`thinking_delta`, OpenAI `reasoning_content`, Gemini `thought` parts, Ollama
+`thinking`) to `{ type: 'reasoning', text }`. Since 0.7.0 the handler also
+strips **inline** reasoning — `<think>…</think>`, `<thinking>`, `<reasoning>`,
+`<|begin_of_thought|>` blocks a model writes into the answer itself — out of
+`delta` events and `ChatResult.text`, and emits it on the same `reasoning`
+channel. Tags split across chunks and a template-opened block that only ever
+sends its closing tag are both handled (`src/reasoning.ts`, ported from AI
+Server Studio's stripper). Pass `new AIHandler({ stripInlineReasoning: false })`
+to receive the raw text instead. `stripReasoningBlocks(text)` and
+`createReasoningStripper()` are exported for text you buffered yourself.
+
+## Reasoning effort
+
+`ChatRequest.reasoningEffort` (`'none' | 'minimal' | 'low' | 'medium' | 'high'`)
+is one vocabulary for "how hard should a thinking-capable model think", mapped
+onto each provider's own knob. It is only sent when you set it — non-reasoning
+models reject the parameter outright, so the nugget never guesses.
+
+| Engine | Wire field | `'none'` | `'minimal'` … `'high'` |
+|---|---|---|---|
+| `openaiChat` | `reasoning_effort` | `'none'` | the word as-is |
+| `anthropic` | `thinking` | `{ type: 'disabled' }` | `{ type: 'enabled', budget_tokens }` from `REASONING_BUDGET_TOKENS` (1 024 / 2 048 / 8 192 / 16 384); `max_tokens` is raised to fit when it would not, and `temperature`/`top_p` are dropped because Anthropic refuses them alongside thinking |
+| `google` | `generationConfig.thinkingConfig.thinkingBudget` | `0` | the same token tiers |
+| `ollama` | `think` | `false` | `true` (Ollama has no graded effort for most models) |
+
+A provider-native value in `providerOptions` (`reasoning_effort`, `thinking`,
+`thinkingConfig`, `think`) wins over `reasoningEffort` on collision. The agent
+layer forwards `AgentOptions.reasoningEffort` to every turn.
+
+### OpenAI reasoning models and function tools
+
+OpenAI's `/chat/completions` refuses function tools on a reasoning model unless
+`reasoning_effort` is `'none'` (the error reads *"Function tools with
+reasoning_effort are not supported … use /v1/responses or set reasoning_effort
+to 'none'"*), and the provider default is not `'none'`. Rather than let every
+app discover this as a 400 on its first tool-using turn, the `openaiChat`
+engine retries that one request once with `reasoning_effort: 'none'` and emits
+`{ type: 'context', kind: 'reasoning_effort_disabled_for_tools', data: { reason,
+requested } }` on the stream so the change is never silent. The retry is
+reactive on purpose — sending the parameter up front would 400 on non-reasoning
+models — and it only fires when the request carried tools and the effective
+effort was not already `'none'`. Set `reasoningEffort: 'none'` yourself on
+tool-using turns to skip the extra round trip.
+
+The `/v1/responses` API keeps reasoning *and* tools; a `responses` engine is the
+planned long-term path and is not in this release.
+
 ## Stream anomalies
 
 All four engines emit `{ type: 'context', kind: 'stream_anomaly' }` when a

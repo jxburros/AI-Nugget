@@ -172,6 +172,12 @@ function body(req) {
         format: req.responseFormat?.type === 'json' ? (req.responseFormat.schema ?? 'json') : undefined,
         tools: req.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
     };
+    // First-class reasoning effort → Ollama's `think` flag (reasoning arrives in
+    // `message.thinking`, which this engine already routes to `reasoning` events).
+    // Ollama has no graded effort for most models, so anything but `'none'` is
+    // `true`. Only sent when asked for: a model without thinking support rejects it.
+    if (req.reasoningEffort !== undefined)
+        base.think = req.reasoningEffort !== 'none';
     // providerOptions reaches Ollama's real request fields — `options.num_ctx`,
     // `options.num_keep`, top-level `keep_alive`, `think`, etc. `options` is
     // merged one level deep so num_ctx joins the samplers above rather than

@@ -49,6 +49,7 @@ async function* run(opts, resolveResult) {
                 maxTokens: opts.maxTokens,
                 topP: opts.topP,
                 stopSequences: opts.stopSequences,
+                reasoningEffort: opts.reasoningEffort,
                 providerOptions: opts.providerOptions,
                 signal: agentSignal.signal,
                 metadata: { ...opts.metadata, agentStep: step },

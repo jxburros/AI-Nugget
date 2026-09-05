@@ -2,6 +2,7 @@ export * from './types.js';
 export * from './errors.js';
 export * from './transport.js';
 export * from './json.js';
+export * from './reasoning.js';
 export * from './tokens.js';
 export * from './keys.js';
 export * from './connect.js';

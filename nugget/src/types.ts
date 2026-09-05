@@ -33,12 +33,29 @@ export interface ToolSchema {
   parameters: object;
 }
 
+/**
+ * How hard a reasoning-capable model should think before answering. The nugget
+ * maps one vocabulary onto each provider's own knob (see `docs/providers.md`,
+ * "Reasoning effort"): OpenAI `reasoning_effort`, Anthropic `thinking`
+ * (`budget_tokens` tiers), Google `generationConfig.thinkingConfig.thinkingBudget`,
+ * Ollama `think`. `'none'` disables reasoning where the provider allows it.
+ * Unset means the provider's own default — the nugget never sends the knob
+ * unasked, because non-reasoning models reject it.
+ */
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high';
+
 export interface ChatRequest {
   model: string;
   messages: ChatMessage[];
   temperature?: number;
   maxTokens?: number;
   topP?: number;
+  /**
+   * Reasoning effort for thinking-capable models — see {@link ReasoningEffort}.
+   * A provider-native value in `providerOptions` (e.g. `reasoning_effort`,
+   * `thinking`, `thinkingConfig`, `think`) wins over this on collision.
+   */
+  reasoningEffort?: ReasoningEffort;
   responseFormat?: { type: 'text' } | { type: 'json'; schema?: object };
   tools?: ToolSchema[];
   toolChoice?: 'auto' | 'none' | { name: string };

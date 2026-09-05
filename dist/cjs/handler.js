@@ -6,6 +6,7 @@ const index_js_1 = require("./adapters/index.js");
 const profiles_js_1 = require("./adapters/profiles.js");
 const errors_js_1 = require("./errors.js");
 const json_js_1 = require("./json.js");
+const reasoning_js_1 = require("./reasoning.js");
 const policy_js_1 = require("./policy.js");
 const redact_js_1 = require("./redact.js");
 const util_js_1 = require("./util.js");
@@ -71,8 +72,11 @@ class AIHandler {
             const maxAttempts = this.opts.retry?.maxAttempts ?? 3;
             let emittedStart = false;
             let emittedOutput = false;
+            const stripInline = this.opts.stripInlineReasoning !== false;
             for (;;) {
                 attempt += 1;
+                // One stripper per attempt: a retried stream starts its tag state over.
+                const stripper = stripInline ? (0, reasoning_js_1.createReasoningStripper)() : null;
                 try {
                     for await (const event of adapter.stream(resolved, req)) {
                         if (event.type === 'start') {
@@ -84,10 +88,31 @@ class AIHandler {
                         }
                         if (event.type === 'delta' || event.type === 'tool_call')
                             emittedOutput = true;
+                        if (event.type === 'delta' && stripper) {
+                            // Inline reasoning never reaches `delta`; it rides the reasoning channel like a
+                            // provider-native thinking field would.
+                            const piece = stripper.push(event.text);
+                            if (piece.reasoning)
+                                yield { type: 'reasoning', text: piece.reasoning };
+                            if (piece.visible)
+                                yield { type: 'delta', text: piece.visible };
+                            continue;
+                        }
                         if (event.type === 'done') {
-                            await this.recordSuccess(callId, conn, req, startedAt, attempt, event.result);
+                            let result = event.result;
+                            if (stripper) {
+                                const tail = stripper.end();
+                                if (tail.reasoning)
+                                    yield { type: 'reasoning', text: tail.reasoning };
+                                if (tail.visible)
+                                    yield { type: 'delta', text: tail.visible };
+                                if ((0, reasoning_js_1.containsReasoningBlock)(result.text)) {
+                                    result = { ...result, text: (0, reasoning_js_1.stripReasoningBlocks)(result.text) };
+                                }
+                            }
+                            await this.recordSuccess(callId, conn, req, startedAt, attempt, result);
                             recorded = true;
-                            yield event;
+                            yield { ...event, result };
                             return;
                         }
                         yield event;
