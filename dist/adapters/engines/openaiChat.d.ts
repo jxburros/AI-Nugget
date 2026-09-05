@@ -13,4 +13,10 @@ export declare class OpenAIChatAdapter implements ProviderAdapter {
     }>;
     embed(conn: ResolvedConnection, req: EmbedRequest): Promise<EmbedResult>;
 }
+/**
+ * True when a `/chat/completions` 400 is the "function tools with reasoning_effort
+ * are not supported" refusal AND the request actually carried tools AND the caller
+ * did not already pin `reasoning_effort` (in which case the choice is theirs).
+ */
+export declare function shouldRetryWithoutReasoningEffort(error: unknown, req: ChatRequest): boolean;
 //# sourceMappingURL=openaiChat.d.ts.map

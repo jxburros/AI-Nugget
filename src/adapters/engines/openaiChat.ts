@@ -34,7 +34,32 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(urlFor(conn, this.profile, req), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+      let res: Response;
+      try {
+        res = await postResponse(urlFor(conn, this.profile, req), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+      } catch (error) {
+        // OpenAI's `/chat/completions` refuses function tools on a reasoning model
+        // unless `reasoning_effort` is `'none'` ("Function tools with reasoning_effort
+        // are not supported … use /v1/responses or set reasoning_effort to 'none'").
+        // The nugget never sets `reasoning_effort` itself, so the provider default
+        // applies and every tool-using turn 400s. Rather than make each app learn
+        // this the hard way, retry the one request once with the effort disabled
+        // and say so on the stream. Reactive on purpose: sending
+        // `reasoning_effort` up front would 400 on non-reasoning models instead.
+        // A caller-requested effort is overridden too — the alternative is a hard
+        // 400 with no tool call at all — and the context event says so.
+        if (!shouldRetryWithoutReasoningEffort(error, req)) throw error;
+        yield {
+          type: 'context',
+          kind: 'reasoning_effort_disabled_for_tools',
+          data: {
+            reason: 'provider rejected function tools with reasoning_effort; retried with reasoning_effort: none',
+            requested: req.providerOptions?.reasoning_effort ?? req.reasoningEffort ?? null,
+          },
+        };
+        const retryReq: ChatRequest = { ...req, providerOptions: { ...req.providerOptions, reasoning_effort: 'none' } };
+        res = await postResponse(urlFor(conn, this.profile, retryReq), openAiBody(retryReq, this.profile), conn.headers, timeout.signal, conn.provider);
+      }
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         // Server ignored stream:true (or is a buffered gateway) — recover the whole body.
@@ -161,6 +186,9 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile): Record<string, 
     stream_options: profile.quirks?.supportsUsageInStream ? { include_usage: true } : undefined,
   };
   if (req.maxTokens !== undefined) body[profile.quirks?.maxTokensParam ?? 'max_tokens'] = req.maxTokens;
+  // First-class reasoning effort → OpenAI's `reasoning_effort`. Only sent when
+  // asked for: non-reasoning models reject the parameter outright.
+  if (req.reasoningEffort !== undefined) body.reasoning_effort = req.reasoningEffort;
   // providerOptions carries OpenAI-native fields the nugget doesn't model
   // (`reasoning_effort`, `parallel_tool_calls`, `seed`, `logprobs`, …). `apiVersion`
   // is consumed by urlFor for Azure and stripped here so it never hits the body.
@@ -250,3 +278,20 @@ function mapFinish(finish: string | undefined, hasToolCalls: boolean): ChatResul
   return 'stop';
 }
 
+
+/**
+ * True when a `/chat/completions` 400 is the "function tools with reasoning_effort
+ * are not supported" refusal AND the request actually carried tools AND the caller
+ * did not already pin `reasoning_effort` (in which case the choice is theirs).
+ */
+export function shouldRetryWithoutReasoningEffort(error: unknown, req: ChatRequest): boolean {
+  if (!(error instanceof AIError) || error.status !== 400) return false;
+  if (!req.tools || req.tools.length === 0) return false;
+  // Already `'none'` (from either knob) — the refusal is about something else.
+  const effective = req.providerOptions && 'reasoning_effort' in req.providerOptions
+    ? req.providerOptions.reasoning_effort
+    : req.reasoningEffort;
+  if (effective === 'none') return false;
+  const text = `${error.raw ?? ''} ${error.message}`.toLowerCase();
+  return text.includes('reasoning_effort') && text.includes('tool');
+}

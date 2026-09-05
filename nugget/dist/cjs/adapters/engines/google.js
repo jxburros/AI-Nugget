@@ -188,6 +188,13 @@ function body(req) {
             config.allowedFunctionNames = [req.toolChoice.name];
         payload.toolConfig = { functionCallingConfig: config };
     }
+    if (req.reasoningEffort !== undefined) {
+        // First-class reasoning effort → Gemini's thinking budget. 0 disables
+        // thinking on models that allow it; others treat it as a minimum.
+        payload.generationConfig.thinkingConfig = {
+            thinkingBudget: util_js_1.REASONING_BUDGET_TOKENS[req.reasoningEffort],
+        };
+    }
     // providerOptions reaches Google-native fields: top-level `safetySettings`,
     // `cachedContent`, and `generationConfig` extras (`thinkingConfig`,
     // `responseModalities`, …) merged one level deep into generationConfig.

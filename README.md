@@ -1,6 +1,6 @@
 # AI Nugget
 
-**Version 0.6.0** · [What's changed since 0.5.0](#whats-changed-since-050) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.7.0** · [What's changed since 0.6.0](#whats-changed-since-060) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -108,11 +108,30 @@ new AIHandler({
 - **Seams** — `KeySource` (env/literal/memory/chain + ref parsing), `Redactor`,
   neutral `GovernancePolicy` (`blocklistPolicy`/`allowlistPolicy`/`composePolicies`),
   `TelemetrySink`, and an optional `pricing` hook. `providerOptions` passes
-  provider-native fields through without waiting for a library release.
+  provider-native fields through without waiting for a library release;
+  `reasoningEffort` is one word for "how hard should the model think", mapped
+  per provider ([docs](./docs/providers.md#reasoning-effort)).
 - **Agent layer** (`@jxburros/ai-nugget/agent`) — `defineTool`, `runAgent()`
   model↔tool loop over the full pipeline, streamed `AgentEvent`s, budgets with
   honest `stopReason`s, an `ApprovalGate` for side-effecting tools, and
   `native`/`promptJson`/`auto` tool modes.
+
+## What's changed since 0.6.0
+
+**0.7.0 is backward-compatible** — both changes are additive. Full detail in the
+[changelog](./CHANGELOG.md) and [UPGRADING.md](./UPGRADING.md#06x--070).
+
+- **`ChatRequest.reasoningEffort`** (`none` / `minimal` / `low` / `medium` /
+  `high`) — one vocabulary for reasoning effort, mapped onto OpenAI
+  `reasoning_effort`, Anthropic `thinking`, Google `thinkingConfig`, and Ollama
+  `think`; forwarded by the agent loop via `AgentOptions.reasoningEffort`.
+  Never sent unless you set it. See [Reasoning effort](./docs/providers.md#reasoning-effort).
+- **OpenAI reasoning models can call tools again.** `/chat/completions` refuses
+  function tools unless `reasoning_effort` is `'none'`; the `openaiChat` engine
+  now retries that one request with it set and emits a
+  `reasoning_effort_disabled_for_tools` context event so the change is visible.
+  Learned from AI Server Studio's Build 3 shakedown, where every tool-using
+  turn on `gpt-5.x`/`gpt-6` 400'd.
 
 ## What's changed since 0.5.0
 

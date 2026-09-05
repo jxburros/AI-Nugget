@@ -112,3 +112,6 @@ every `execute()`; see the
 - `examples/agent-prompt-json.mjs` — `promptJson` against a local model
 - `examples/agent-native-tools.mjs` — `auto` resolving to native tool-calling
 - `examples/agent-approval-gate.mjs` — allow / deny / rewrite
+
+
+`AgentOptions.reasoningEffort` is forwarded to every turn — see `docs/providers.md`, "Reasoning effort".

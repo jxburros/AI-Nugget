@@ -1,5 +1,20 @@
 # Upgrading
 
+## 0.6.x → 0.7.0
+
+**Backward-compatible.** Two additive changes, no action required:
+
+- **`ChatRequest.reasoningEffort`** (and `AgentOptions.reasoningEffort`) — a
+  new optional field. Nothing is sent to any provider unless you set it. If you
+  already pass `reasoning_effort` / `thinking` / `thinkingConfig` / `think`
+  through `providerOptions`, that keeps winning on collision.
+- **A new `context` stream event, `reasoning_effort_disabled_for_tools`** — the
+  `openaiChat` engine emits it when it retried a tool-using request with
+  `reasoning_effort: 'none'` after OpenAI refused the first attempt. Ignoring
+  it keeps the old behaviour minus the 400. If you *want* the hard failure
+  instead (to route to `/v1/responses` yourself), set `reasoningEffort: 'none'`
+  explicitly on tool-using turns — then no retry happens and any 400 is yours.
+
 ## 0.5.x → 0.6.0
 
 Behavior-compatible for ordinary consumers, with **two things worth checking**.

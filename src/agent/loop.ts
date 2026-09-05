@@ -3,7 +3,7 @@ import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import type { AIHandler } from '../handler.js';
-import type { AIErrorKind, ChatMessage, Connection, StreamEvent, ToolCall, Usage } from '../types.js';
+import type { AIErrorKind, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
 import { asRecord, sleep } from '../util.js';
 import type { ToolSpec } from './tools.js';
 import { validateToolArgs } from './tools.js';
@@ -37,6 +37,8 @@ export interface AgentOptions {
   maxTokens?: number;
   topP?: number;
   stopSequences?: string[];
+  /** Reasoning effort forwarded to every turn — see {@link ChatRequest.reasoningEffort}. */
+  reasoningEffort?: ReasoningEffort;
   /** Provider-native passthrough forwarded to every turn — see {@link ChatRequest.providerOptions}. */
   providerOptions?: Record<string, unknown>;
   budget?: {
@@ -139,6 +141,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
         maxTokens: opts.maxTokens,
         topP: opts.topP,
         stopSequences: opts.stopSequences,
+        reasoningEffort: opts.reasoningEffort,
         providerOptions: opts.providerOptions,
         signal: agentSignal.signal,
         metadata: { ...opts.metadata, agentStep: step },

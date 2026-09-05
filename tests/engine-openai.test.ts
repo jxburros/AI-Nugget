@@ -136,6 +136,63 @@ describe('openaiChat engine contract', () => {
     expect(events.some((e) => e.type === 'context' && e.kind === 'stream_anomaly')).toBe(true);
   });
 
+  describe('reasoning_effort vs function tools (OpenAI reasoning models)', () => {
+    const refusal = { error: { message: "Function tools with reasoning_effort are not supported. Please use /v1/responses or set reasoning_effort to 'none'.", type: 'invalid_request_error' } };
+    const tools = [{ name: 'get_weather', description: 'w', parameters: { type: 'object' } }];
+
+    it('retries once with reasoning_effort: none and discloses it as a context event', async () => {
+      const { calls } = mockFetch(
+        jsonResponse(refusal, 400),
+        sseResponse([
+          { choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'get_weather', arguments: '{}' } }] } }] },
+          { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+        ]),
+      );
+      const events = await collect(openai().stream(resolved('openai'), chatReq({ model: 'gpt-5.6-sol', tools })));
+      expect(calls).toHaveLength(2);
+      expect((calls[0]!.body as Record<string, unknown>).reasoning_effort).toBeUndefined();
+      expect((calls[1]!.body as Record<string, unknown>).reasoning_effort).toBe('none');
+      expect(Array.isArray((calls[1]!.body as Record<string, unknown>).tools)).toBe(true);
+      expect(events.some((e) => e.type === 'context' && e.kind === 'reasoning_effort_disabled_for_tools')).toBe(true);
+      expect(events.some((e) => e.type === 'tool_call')).toBe(true);
+      expect(events.at(-1)?.type).toBe('done');
+    });
+
+    it('does not retry when the request carried no tools', async () => {
+      const { calls } = mockFetch(jsonResponse(refusal, 400));
+      await expect(openai().chat(resolved('openai'), chatReq({ model: 'gpt-5.6-sol' }))).rejects.toMatchObject({ kind: 'invalid_request', status: 400 });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('overrides a caller-set reasoning_effort too, disclosing the requested value', async () => {
+      const { calls } = mockFetch(jsonResponse(refusal, 400), sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+      const events = await collect(openai().stream(resolved('openai'), chatReq({ model: 'gpt-5.6-sol', tools, providerOptions: { reasoning_effort: 'high' } })));
+      expect(calls).toHaveLength(2);
+      expect((calls[0]!.body as Record<string, unknown>).reasoning_effort).toBe('high');
+      expect((calls[1]!.body as Record<string, unknown>).reasoning_effort).toBe('none');
+      const ctx = events.find((e) => e.type === 'context' && e.kind === 'reasoning_effort_disabled_for_tools') as { data: { requested: string } } | undefined;
+      expect(ctx?.data.requested).toBe('high');
+    });
+
+    it('does not retry when reasoning_effort is already none', async () => {
+      const { calls } = mockFetch(jsonResponse(refusal, 400));
+      await expect(openai().chat(resolved('openai'), chatReq({ tools, reasoningEffort: 'none' }))).rejects.toMatchObject({ status: 400 });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('does not retry an unrelated 400', async () => {
+      const { calls } = mockFetch(jsonResponse({ error: { message: 'Invalid value for messages' } }, 400));
+      await expect(openai().chat(resolved('openai'), chatReq({ tools }))).rejects.toMatchObject({ status: 400 });
+      expect(calls).toHaveLength(1);
+    });
+
+    it('surfaces the retried request\'s own failure without a second retry', async () => {
+      const { calls } = mockFetch(jsonResponse(refusal, 400), jsonResponse(refusal, 400));
+      await expect(openai().chat(resolved('openai'), chatReq({ tools }))).rejects.toMatchObject({ status: 400 });
+      expect(calls).toHaveLength(2);
+    });
+  });
+
   it('cancels mid-stream when the request signal aborts', async () => {
     const ac = new AbortController();
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_input, init: RequestInit = {}) =>

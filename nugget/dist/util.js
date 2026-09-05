@@ -98,4 +98,17 @@ export function sleep(ms, signal) {
         }
     });
 }
+/**
+ * Token budgets behind the {@link ReasoningEffort} tiers for providers that
+ * express effort as a thinking-token budget (Anthropic `budget_tokens`, Google
+ * `thinkingBudget`). `'none'` is 0. Deliberately conservative: they are floors
+ * a model may stop under, not ceilings it fills.
+ */
+export const REASONING_BUDGET_TOKENS = {
+    none: 0,
+    minimal: 1024,
+    low: 2048,
+    medium: 8192,
+    high: 16384,
+};
 //# sourceMappingURL=util.js.map

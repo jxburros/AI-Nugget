@@ -3,6 +3,51 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-09-05 - Claude — 0.7.0
+
+Both changes come out of AI Server Studio's 2026-09-05 "Build 3 shakedown",
+where every tool-using turn on an OpenAI reasoning model (`gpt-5.6-sol`,
+`gpt-6-astra`) failed with HTTP 400 and the owner asked for a first-class way to
+choose effort in both the nugget and the app.
+
+### Changed
+
+- **`ChatRequest.reasoningEffort`** — new optional field
+  (`'none' | 'minimal' | 'low' | 'medium' | 'high'`, exported as
+  `ReasoningEffort`) mapped per engine: OpenAI `reasoning_effort`; Anthropic
+  `thinking` (`disabled` for `none`, else `enabled` with `budget_tokens` from
+  the new `REASONING_BUDGET_TOKENS` tiers, `max_tokens` raised to fit and
+  `temperature`/`top_p` dropped as Anthropic requires); Google
+  `generationConfig.thinkingConfig.thinkingBudget`; Ollama `think`. Never sent
+  unless set. `providerOptions` still wins on collision. `AgentOptions.reasoningEffort`
+  forwards it to every agent turn.
+- **OpenAI tools + reasoning refusal handled at the seam.** When
+  `/chat/completions` answers a tool-carrying request with the "Function tools
+  with reasoning_effort are not supported" 400, `openaiChat` retries that one
+  request with `reasoning_effort: 'none'` and emits
+  `{ type: 'context', kind: 'reasoning_effort_disabled_for_tools', data: { reason, requested } }`.
+  Reactive by design (sending the parameter up front 400s on non-reasoning
+  models); skipped when the effective effort is already `'none'`, when the
+  request has no tools, or on any other 400. The retried request's own failure
+  is surfaced as-is (no second retry). `shouldRetryWithoutReasoningEffort` is
+  exported for tests.
+- Docs: `docs/providers.md` "Reasoning effort" section, README "What's changed
+  since 0.6.0", `UPGRADING.md` 0.6.x → 0.7.0. Version bumped to 0.7.0 and
+  `nugget/` regenerated.
+
+### Not completed
+
+- An OpenAI `/v1/responses` engine (reasoning *and* tools on the same request)
+  — recorded as the long-term path in `docs/providers.md`; not built.
+
+### Notes
+
+- Validation: `npm run typecheck`, `npm run lint`, `npm test` (all pass, 212
+  tests incl. 11 new in `tests/engine-openai.test.ts` and
+  `tests/reasoning-effort.test.ts`), `npm run test:browser` (headless Chromium,
+  same 206), `npm run build`, `npm run build:nugget`. Not exercised against a
+  live OpenAI endpoint here.
+
 ## 2026-08-10 - Claude — 0.6.0
 
 Cuts a release for the backward-compatible changes accumulated since 0.5.0: the
