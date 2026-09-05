@@ -2,7 +2,16 @@
 
 ## 0.6.x → 0.7.0
 
-**Backward-compatible.** Two additive changes, no action required:
+**Backward-compatible for ordinary consumers.** Two additive changes and one
+default-behaviour change worth knowing about:
+
+- **Inline reasoning is stripped by default.** A model that writes
+  `<think>…</think>` (or `<thinking>`, `<reasoning>`, `<|begin_of_thought|>`)
+  into its answer no longer has that text in `delta` events or
+  `ChatResult.text`; it arrives as `{ type: 'reasoning', text }` events, the
+  same channel a provider-native thinking field already used. If your app
+  parsed or displayed those tags itself, either delete that code or pass
+  `new AIHandler({ stripInlineReasoning: false })` to keep the raw text.
 
 - **`ChatRequest.reasoningEffort`** (and `AgentOptions.reasoningEffort`) — a
   new optional field. Nothing is sent to any provider unless you set it. If you

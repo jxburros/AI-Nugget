@@ -95,6 +95,20 @@ for await (const event of handler.stream(conn, req)) {
 }
 ```
 
+## Inline reasoning is stripped at the seam
+
+Every engine already routes a provider's *dedicated* reasoning field (Anthropic
+`thinking_delta`, OpenAI `reasoning_content`, Gemini `thought` parts, Ollama
+`thinking`) to `{ type: 'reasoning', text }`. Since 0.7.0 the handler also
+strips **inline** reasoning — `<think>…</think>`, `<thinking>`, `<reasoning>`,
+`<|begin_of_thought|>` blocks a model writes into the answer itself — out of
+`delta` events and `ChatResult.text`, and emits it on the same `reasoning`
+channel. Tags split across chunks and a template-opened block that only ever
+sends its closing tag are both handled (`src/reasoning.ts`, ported from AI
+Server Studio's stripper). Pass `new AIHandler({ stripInlineReasoning: false })`
+to receive the raw text instead. `stripReasoningBlocks(text)` and
+`createReasoningStripper()` are exported for text you buffered yourself.
+
 ## Reasoning effort
 
 `ChatRequest.reasoningEffort` (`'none' | 'minimal' | 'low' | 'medium' | 'high'`)

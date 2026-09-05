@@ -31,9 +31,19 @@ choose effort in both the nugget and the app.
   request has no tools, or on any other 400. The retried request's own failure
   is surfaced as-is (no second retry). `shouldRetryWithoutReasoningEffort` is
   exported for tests.
-- Docs: `docs/providers.md` "Reasoning effort" section, README "What's changed
-  since 0.6.0", `UPGRADING.md` 0.6.x → 0.7.0. Version bumped to 0.7.0 and
-  `nugget/` regenerated.
+- **Inline reasoning stripped at the seam** (`src/reasoning.ts`, on by
+  default, `HandlerOptions.stripInlineReasoning: false` opts out). The handler
+  runs a streaming state machine over every engine's `delta` events: `<think>`
+  / `<thinking>` / `<reasoning>` / `<|begin_of_thought|>` blocks — including
+  tags split across chunks, unterminated blocks, and a template-opened block
+  whose only tag is the closing one — go to `{ type: 'reasoning' }` events and
+  are removed from `ChatResult.text`. Exported: `createReasoningStripper`,
+  `stripReasoningBlocks(Detailed)`, `containsReasoningBlock`. Ported from AI
+  Server Studio's `services/reasoningFilter.ts`, which every one of its stream
+  call sites had to run because the nugget did not.
+- Docs: `docs/providers.md` "Inline reasoning" and "Reasoning effort"
+  sections, README "What's changed since 0.6.0", `UPGRADING.md` 0.6.x → 0.7.0.
+  Version bumped to 0.7.0 and `nugget/` regenerated.
 
 ### Not completed
 
@@ -42,11 +52,11 @@ choose effort in both the nugget and the app.
 
 ### Notes
 
-- Validation: `npm run typecheck`, `npm run lint`, `npm test` (all pass, 212
-  tests incl. 11 new in `tests/engine-openai.test.ts` and
-  `tests/reasoning-effort.test.ts`), `npm run test:browser` (headless Chromium,
-  same 206), `npm run build`, `npm run build:nugget`. Not exercised against a
-  live OpenAI endpoint here.
+- Validation: `npm run typecheck`, `npm run lint`, `npm test` (221 tests, 215
+  pass + 6 env-gated live skips; new: `tests/reasoning-effort.test.ts`,
+  `tests/reasoning.test.ts`, 5 cases in `tests/engine-openai.test.ts`),
+  `npm run test:browser` (headless Chromium, same suite), `npm run build`,
+  `npm run build:nugget`. Not exercised against a live provider here.
 
 ## 2026-08-10 - Claude — 0.6.0
 

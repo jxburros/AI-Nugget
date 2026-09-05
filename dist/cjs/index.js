@@ -18,6 +18,7 @@ __exportStar(require("./types.js"), exports);
 __exportStar(require("./errors.js"), exports);
 __exportStar(require("./transport.js"), exports);
 __exportStar(require("./json.js"), exports);
+__exportStar(require("./reasoning.js"), exports);
 __exportStar(require("./tokens.js"), exports);
 __exportStar(require("./keys.js"), exports);
 __exportStar(require("./connect.js"), exports);

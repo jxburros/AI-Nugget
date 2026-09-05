@@ -118,7 +118,7 @@ new AIHandler({
 
 ## What's changed since 0.6.0
 
-**0.7.0 is backward-compatible** — both changes are additive. Full detail in the
+**0.7.0 is backward-compatible for ordinary consumers** — the first two changes are additive; the third changes what `delta` carries for reasoning models (see UPGRADING). Full detail in the
 [changelog](./CHANGELOG.md) and [UPGRADING.md](./UPGRADING.md#06x--070).
 
 - **`ChatRequest.reasoningEffort`** (`none` / `minimal` / `low` / `medium` /
@@ -132,6 +132,10 @@ new AIHandler({
   `reasoning_effort_disabled_for_tools` context event so the change is visible.
   Learned from AI Server Studio's Build 3 shakedown, where every tool-using
   turn on `gpt-5.x`/`gpt-6` 400'd.
+- **Inline `<think>` reasoning never reaches `delta` or `result.text`.** The
+  handler strips it on every engine and emits it as `reasoning` events
+  (`stripInlineReasoning: false` opts out). Ported from the stripper AI Server
+  Studio had to run at every call site. See [Inline reasoning](./docs/providers.md#inline-reasoning-is-stripped-at-the-seam).
 
 ## What's changed since 0.5.0
 

@@ -31,6 +31,12 @@ export interface HandlerOptions {
      */
     silencePolicyWarning?: boolean;
     /**
+     * Strip inline `<think>…</think>`-style reasoning out of `delta` events and `ChatResult.text`,
+     * emitting it as `{ type: 'reasoning' }` events instead (default `true`; see `src/reasoning.ts`).
+     * Set `false` to receive the raw answer text exactly as the provider sent it.
+     */
+    stripInlineReasoning?: boolean;
+    /**
      * Optional cost estimator. Called once per successful call/embedding with the
      * final usage; its return value (USD) is stored on the telemetry record's
      * `costUsd`. Return undefined to leave a call uncosted. Pricing tables live in
