@@ -1,5 +1,7 @@
 # AI Nugget
 
+<img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
+
 **Version 0.7.0** · [What's changed since 0.6.0](#whats-changed-since-060) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
