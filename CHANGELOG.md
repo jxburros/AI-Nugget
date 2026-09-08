@@ -3,6 +3,17 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-09-08 - Codex
+
+### Changed
+- Added the official AI Nugget logo at `assets/ai-nugget-logo.png` and display it in the README.
+
+### Not completed
+- Automated tests not run; this change only adds a static image asset and documentation markup.
+
+### Notes
+- Validation: verified the PNG dimensions (1254 × 1254) and transparent alpha background.
+
 ## 2026-09-05 - Claude — 0.7.0
 
 Both changes come out of AI Server Studio's 2026-09-05 "Build 3 shakedown",
