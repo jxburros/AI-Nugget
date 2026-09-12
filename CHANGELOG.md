@@ -3,6 +3,30 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-09-12 - Claude
+
+### Changed
+- Added `docs/reviews/2026-09-12-improvement-opportunities.md`: a research
+  report on possible improvements to the nugget, compiled from AI Server
+  Studio's and JX Runtime's recent advances, current provider API changes
+  (OpenAI Responses, Anthropic caching/thinking/structured outputs, Gemini,
+  Ollama, OpenAI-compatible reasoning dialects), and features of comparable
+  libraries (Vercel AI SDK, Token.js, LiteLLM, OpenRouter, Portkey, LangChain,
+  Genkit, Pydantic AI and others). 26 candidates are scored against the
+  Feature Admission Test with a suggested 0.8.0 / 0.9.0 / 1.0.0 sequencing,
+  plus 12 honesty/hygiene items found in passing (notably: the 0.7.0
+  Anthropic `budget_tokens` mapping is reported deprecated/rejected upstream,
+  and the OpenAI spec does not document `Idempotency-Key` on chat/responses).
+- README documentation table links the new report.
+
+### Not completed
+- No code changes; nothing in the report has been built. Items marked
+  `[summary]` in the report rest on search-result summaries because several
+  vendor documentation hosts were unreachable from this session.
+
+### Notes
+- Validation: docs-only change; test suite not run.
+
 ## 2026-09-08 - Codex
 
 ### Changed

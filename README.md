@@ -89,6 +89,7 @@ new AIHandler({
 | [distribution.md](./docs/distribution.md) | Commands, live smoke tests, CI workflows, npm/GitHub Packages/vendored `nugget/`, bundler notes |
 | [design.md](./design.md) | The full contract |
 | [state-of-the-nugget.md](./docs/state-of-the-nugget.md) | Current health snapshot: architecture, safety and reliability posture, coverage gaps, what's next |
+| [2026-09-12 improvement report](./docs/reviews/2026-09-12-improvement-opportunities.md) | Research report: lessons from AI Server Studio and JX Runtime, provider API changes, comparable libraries, and 26 scored candidates for future releases |
 | [UPGRADING.md](./UPGRADING.md) | Version-by-version changes |
 
 ## What's in the box
