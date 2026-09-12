@@ -12,7 +12,7 @@ phased build in `development-plan.md`; entries note which phase they advance.
   (OpenAI Responses, Anthropic caching/thinking/structured outputs, Gemini,
   Ollama, OpenAI-compatible reasoning dialects), and features of comparable
   libraries (Vercel AI SDK, Token.js, LiteLLM, OpenRouter, Portkey, LangChain,
-  Genkit, Pydantic AI and others). 26 candidates are scored against the
+  Genkit, Pydantic AI and others). 25 candidates are scored against the
   Feature Admission Test with a suggested 0.8.0 / 0.9.0 / 1.0.0 sequencing,
   plus 12 honesty/hygiene items found in passing (notably: the 0.7.0
   Anthropic `budget_tokens` mapping is reported deprecated/rejected upstream,
