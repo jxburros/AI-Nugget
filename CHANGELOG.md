@@ -870,3 +870,8 @@ contract suite + agent layer). Bumped `version` to `0.2.0`.
 - Governance still ships **neutral** — no default block patterns; only the
   `blocklistPolicy`/`allowlistPolicy`/`composePolicies` constructors. No
   xAI/Grok profile is shipped, per the support policy in `design.md` §1.
+
+### Release infrastructure migration — 2026-10-20
+
+- Adopt the unified release manifest, version-advance validation, manual main-only planning, complete artifact staging, and verified draft publisher. Preserve local packaging, existing updater trust, and distribution identities.
+- Validation: shared engine tests, workflow lint, and prepared manifest/version checks. Native/hosted consumer release dry runs and publication remain unverified until the migration is merged and credentials/settings are checked.
