@@ -69,3 +69,7 @@ npm run build:nugget
 
 Live smoke tests are env-gated (`AI_HANDLER_LIVE=1 npm run test:live`) and never
 run by default. Record any skipped validation honestly.
+
+## Unified release maintenance
+
+Keep `release.json` authoritative and synchronize every configured embedded version. Use a patch bump by default for affected apps and real version-specific release notes. Merging or pushing tags prepares source; publish only via the main-branch manual Release action after a successful dry run. Preserve existing updater signatures, tag namespaces, asset names, and the configured checksum/latest compatibility controls. See `.release/README.md`.

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "bumpPolicy": "every-main-change",
+  "apps": {
+    "ai-nugget": {
+      "tagPrefix": "v",
+      "paths": [
+        "**"
+      ],
+      "versionFiles": [
+        {
+          "path": "package.json",
+          "format": "json",
+          "key": "version"
+        },
+        {
+          "path": "package-lock.json",
+          "format": "json",
+          "key": "version"
+        },
+        {
+          "path": "package-lock.json",
+          "format": "json",
+          "key": "packages..version"
+        }
+      ],
+      "notes": ".release/notes/{app}/{version}.md",
+      "assets": [
+        "jxburros-ai-nugget-{version}.tgz"
+      ],
+      "security": "standard",
+      "checksumFile": "SHA256SUMS.txt",
+      "legacyLatest": true
+    }
+  }
+}
