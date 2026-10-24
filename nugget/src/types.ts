@@ -11,9 +11,18 @@ export interface ContentPart {
   mimeType?: string;
 }
 
+/** Opaque provider response content, for replay within the same model/tool workflow.
+ * Keep it unmodified; never include it in telemetry or display it as answer text. */
+export interface ProviderState {
+  provider: string;
+  model: string;
+  content: Record<string, unknown>[];
+}
+
 export interface ChatMessage {
   role: Role;
   content: string | ContentPart[];
+  providerState?: ProviderState;
   toolCalls?: ToolCall[];        // role: 'assistant'
   toolCallId?: string;           // role: 'tool' — answers a specific call
   name?: string;                 // role: 'tool' — the tool's name (Gemini keys
@@ -126,6 +135,7 @@ export interface Usage {
 
 export interface ChatResult {
   text: string;
+  providerState?: ProviderState;
   toolCalls?: ToolCall[];
   finishReason: 'stop' | 'length' | 'tool' | 'content_filter' | 'error' | 'canceled';
   usage: Usage;

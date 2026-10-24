@@ -3,6 +3,20 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-10-24 - Codex — 0.7.1
+
+### Changed
+- Correct modern Claude sampling, adaptive reasoning effort, native JSON schema output and unsupported forced-tool choices.
+- Preserve complete ordered Anthropic content in opaque providerState and replay it within native agent tool loops, including thinking signatures and redacted thinking.
+- Classify SSE API errors as typed failures; stop retries after reasoning output and normalize refusals to content_filter.
+- Regenerate ESM, CommonJS and vendorable distributions; synchronize release version 0.7.1 and migration/provider documentation.
+
+### Not completed
+- Live Anthropic requests and registry publication were not performed.
+
+### Notes
+- Validation: 228 Node and 228 Chromium contract tests passed; build, build:nugget and lint passed. Six credential-gated live tests skipped.
+
 ## 2026-09-08 - Codex
 
 ### Changed

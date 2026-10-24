@@ -1,5 +1,13 @@
 # Upgrading
 
+## 0.7.0 → 0.7.1
+
+Custom Anthropic tool loops should copy `result.providerState` onto their assistant
+messages to preserve signed thinking; `runAgent` already does this. Sampling fields
+are omitted on known modern Claude models. Native JSON schemas replace forced JSON
+tools there; schema-less requests disclose an instruction-only downgrade. Explicit
+unsupported forced-tool and thinking-off choices fail with `invalid_request`.
+
 ## 0.6.x → 0.7.0
 
 **Backward-compatible for ordinary consumers.** Two additive changes and one
