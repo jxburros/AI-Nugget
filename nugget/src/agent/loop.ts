@@ -3,7 +3,7 @@ import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import type { AIHandler } from '../handler.js';
-import type { AIErrorKind, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
+import type { AIErrorKind, ProviderState, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
 import { asRecord, sleep } from '../util.js';
 import type { ToolSpec } from './tools.js';
 import { validateToolArgs } from './tools.js';
@@ -127,6 +127,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
 
       const calls: ToolCall[] = [];
       let stepText = '';
+      let providerState: ProviderState | undefined;
       let streamFailure: AIError | undefined;
       // In promptJson mode a tool directive must not leak into the visible
       // stream, so directive-looking text is withheld from `delta` events (still
@@ -157,6 +158,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
         if (event.type === 'tool_call') calls.push(event.call);
         if (event.type === 'error') streamFailure = event.error;
         if (event.type === 'done') {
+          providerState = event.result.providerState;
           usage = usage ? mergeUsage(usage, event.result.usage) : event.result.usage;
           if (toolMode === 'promptJson' && calls.length === 0) calls.push(...callsFromPromptJson(stepText));
         }
@@ -176,7 +178,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
       finalText = stepText;
       messages.push(toolMode === 'promptJson'
         ? { role: 'assistant', content: stepText }
-        : { role: 'assistant', content: stepText, toolCalls: calls.length ? calls : undefined });
+        : { role: 'assistant', content: stepText, providerState, toolCalls: calls.length ? calls : undefined });
       if (calls.length === 0) return yield* yieldDone('finished');
 
       for (const call of calls) {

@@ -1,4 +1,4 @@
-import { AIError } from '../../errors.js';
+import { AIError, classify } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
@@ -23,7 +23,8 @@ export class AnthropicAdapter {
     }
     async *stream(conn, req) {
         const started = Date.now();
-        const jsonMode = req.responseFormat?.type === 'json' && !req.tools?.length;
+        const nativeJson = modernModel(req.model);
+        const jsonMode = req.responseFormat?.type === 'json' && !nativeJson && !req.tools?.length;
         let firstTokenMs = null;
         let text = '';
         let inputTokens;
@@ -31,6 +32,7 @@ export class AnthropicAdapter {
         let stopReason;
         let sawTerminal = false;
         const emittedTools = [];
+        const responseBlocks = new Map();
         // Partial tool_use blocks keyed by content-block index (input_json_delta accumulation).
         const blocks = new Map();
         const timeout = streamTimeout(conn, req.signal);
@@ -38,12 +40,15 @@ export class AnthropicAdapter {
         // Anthropic JSON mode is implemented as a forced `json_output` tool, which
         // cannot coexist with the caller's own tools — same silent-downgrade shape
         // as Gemini, so it gets the same signal rather than quietly dropping.
-        if (req.responseFormat?.type === 'json' && req.tools?.length) {
+        if (req.responseFormat?.type === 'json' && !nativeJson && req.tools?.length) {
             yield {
                 type: 'context',
                 kind: 'json_mode_downgraded',
                 data: { reason: 'Anthropic JSON mode uses a forced tool and cannot be combined with caller tools; the request was sent without JSON mode', provider: conn.provider },
             };
+        }
+        if (req.responseFormat?.type === 'json' && nativeJson && !req.responseFormat.schema) {
+            yield { type: 'context', kind: 'json_mode_downgraded', data: { provider: conn.provider, reason: 'Claude native JSON outputs require a schema; using a JSON instruction without constrained decoding.' } };
         }
         try {
             const res = await postResponse(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
@@ -51,6 +56,13 @@ export class AnthropicAdapter {
             if (!contentType.includes('text/event-stream')) {
                 const data = await res.json();
                 const parsed = parseResponse(data);
+                const content = asRecord(data)?.content;
+                if (Array.isArray(content))
+                    content.forEach((block, i) => {
+                        const record = asRecord(block);
+                        if (record)
+                            responseBlocks.set(i, record);
+                    });
                 inputTokens = parsed.inputTokens;
                 outputTokens = parsed.outputTokens;
                 stopReason = parsed.stopReason;
@@ -77,7 +89,12 @@ export class AnthropicAdapter {
                     if (!record)
                         continue;
                     const type = asString(record.type);
-                    if (type === 'message_start') {
+                    if (type === 'error') {
+                        const error = asRecord(record.error);
+                        const statuses = { overloaded_error: 529, rate_limit_error: 429, authentication_error: 401, permission_error: 403, invalid_request_error: 400, not_found_error: 404, api_error: 500, billing_error: 402, timeout_error: 504, request_too_large: 413 };
+                        throw classify(statuses[asString(error?.type) ?? ''] ?? 500, JSON.stringify(record), conn.provider);
+                    }
+                    else if (type === 'message_start') {
                         const usage = asRecord(asRecord(record.message)?.usage);
                         inputTokens = asNumber(usage?.input_tokens) ?? inputTokens;
                         outputTokens = asNumber(usage?.output_tokens) ?? outputTokens;
@@ -85,6 +102,8 @@ export class AnthropicAdapter {
                     else if (type === 'content_block_start') {
                         const index = asNumber(record.index) ?? 0;
                         const block = asRecord(record.content_block);
+                        if (block)
+                            responseBlocks.set(index, { ...block });
                         if (block?.type === 'tool_use') {
                             blocks.set(index, { id: asString(block.id) ?? randomId(), name: asString(block.name) ?? 'unknown', raw: '' });
                         }
@@ -92,6 +111,14 @@ export class AnthropicAdapter {
                     else if (type === 'content_block_delta') {
                         const index = asNumber(record.index) ?? 0;
                         const delta = asRecord(record.delta);
+                        const block = responseBlocks.get(index);
+                        if (block && delta) {
+                            const field = delta.type === 'text_delta' ? 'text' : delta.type === 'thinking_delta' ? 'thinking' : delta.type === 'signature_delta' ? 'signature' : undefined;
+                            if (field)
+                                block[field] = String(block[field] ?? '') + String(delta[field] ?? '');
+                            if (delta.type === 'citations_delta')
+                                block.citations = [...(Array.isArray(block.citations) ? block.citations : []), delta.citation];
+                        }
                         if (delta?.type === 'text_delta') {
                             const piece = asString(delta.text) ?? '';
                             if (piece) {
@@ -118,6 +145,9 @@ export class AnthropicAdapter {
                         const partial = blocks.get(index);
                         if (partial) {
                             const call = { id: partial.id, name: partial.name, raw: partial.raw, arguments: parseArgs(partial.raw) };
+                            const block = responseBlocks.get(index);
+                            if (block)
+                                block.input = call.arguments;
                             blocks.delete(index);
                             if (jsonMode && call.name === JSON_MODE_TOOL) {
                                 text = jsonTextFrom([call], text);
@@ -149,6 +179,7 @@ export class AnthropicAdapter {
             const hasTools = emittedTools.length > 0;
             yield { type: 'done', result: {
                     text,
+                    providerState: { provider: conn.provider, model: req.model, content: [...responseBlocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block) },
                     toolCalls: hasTools ? emittedTools : undefined,
                     finishReason: mapStop(stopReason, hasTools),
                     usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
@@ -192,9 +223,15 @@ function body(req, jsonMode) {
         top_p: req.topP,
         stop_sequences: req.stopSequences,
         system,
-        messages: toAnthropicMessages(req.messages.filter((m) => m.role !== 'system')),
+        messages: toAnthropicMessages(req.messages.filter((m) => m.role !== 'system'), req.model),
         stream: true,
     };
+    if (req.responseFormat?.type === 'json' && modernModel(req.model) && req.responseFormat.schema) {
+        base.output_config = { format: { type: 'json_schema', schema: schemaFor(req) } };
+    }
+    if (req.responseFormat?.type === 'json' && modernModel(req.model) && !req.responseFormat.schema) {
+        base.system = [system, 'Return only valid JSON, without markdown fences or a preamble.'].filter(Boolean).join('\n\n');
+    }
     if (jsonMode) {
         // Forced-tool JSON mode: Anthropic has no response_format, so we make the
         // model answer through a single required tool whose input is the JSON we want.
@@ -215,7 +252,14 @@ function body(req, jsonMode) {
         // `budget_tokens < max_tokens` and rejects temperature/top_p alongside
         // thinking, so the budget is fitted under max_tokens (raising max_tokens
         // when the caller's value leaves no room) and the samplers are dropped.
-        if (req.reasoningEffort === 'none') {
+        if (modernModel(req.model)) {
+            const none = req.reasoningEffort === 'none';
+            if (none && alwaysThinking(req.model))
+                throw new AIError('This Claude model cannot disable thinking; choose a reasoning effort instead.', { kind: 'invalid_request', provider: 'anthropic' });
+            base.thinking = { type: none ? (/^claude-sonnet-5-5(?:-|$)/.test(req.model) ? 'between_tools' : 'disabled') : 'adaptive' };
+            base.output_config = { ...asRecord(base.output_config), effort: none ? 'low' : req.reasoningEffort === 'minimal' ? 'low' : req.reasoningEffort };
+        }
+        else if (req.reasoningEffort === 'none') {
             base.thinking = { type: 'disabled' };
         }
         else {
@@ -230,14 +274,24 @@ function body(req, jsonMode) {
     }
     // providerOptions carries Anthropic-native fields (`thinking`, `metadata`,
     // top-level `cache_control` extras, `service_tier`, …) without a release.
-    return applyProviderOptions(base, req.providerOptions);
+    const result = applyProviderOptions(base, req.providerOptions, ['output_config']);
+    if (modernModel(req.model)) {
+        delete result.temperature;
+        delete result.top_p;
+        delete result.top_k;
+    }
+    const choice = asRecord(result.tool_choice);
+    if (noForcedTools(req.model) && (choice?.type === 'tool' || choice?.type === 'any')) {
+        throw new AIError('This Claude model does not support forced tool choice; use auto or structured outputs.', { kind: 'invalid_request', provider: 'anthropic' });
+    }
+    return result;
 }
-function toAnthropicMessages(messages) {
+function toAnthropicMessages(messages, model) {
     const out = [];
     for (let index = 0; index < messages.length; index += 1) {
         const message = messages[index];
         if (message.role !== 'tool') {
-            out.push(toAnthropicMessage(message));
+            out.push(toAnthropicMessage(message, model));
             continue;
         }
         const content = [];
@@ -251,7 +305,10 @@ function toAnthropicMessages(messages) {
     }
     return out;
 }
-function toAnthropicMessage(m) {
+function toAnthropicMessage(m, model) {
+    if (m.role === 'assistant' && m.providerState?.provider === 'anthropic' && m.providerState.model === model) {
+        return { role: 'assistant', content: m.providerState.content };
+    }
     // Tool-role messages are handled by toAnthropicMessages' batching loop and
     // never reach here, so no tool branch is needed.
     // assistant turns that carried tool calls replay them as tool_use blocks,
@@ -316,8 +373,21 @@ function jsonTextFrom(toolCalls, fallback) {
 function mapStop(stop, hasTools) {
     if (stop === 'tool_use' && hasTools)
         return 'tool';
+    if (stop === 'refusal')
+        return 'content_filter';
     if (stop === 'max_tokens')
         return 'length';
     return 'stop';
+}
+/** Models released after Opus 4.6 use adaptive effort and reject sampling knobs.
+ * Unknown/custom IDs retain legacy behavior rather than guessing capabilities. */
+function modernModel(model) {
+    return /^claude-(?:opus-(?:4-[78]|5(?:-5)?)|sonnet-5(?:-5)?|haiku-5-5|(?:fable|mythos)-5(?:-1)?|mythos-preview)(?:-\d{8}|-latest)?$/.test(model);
+}
+function alwaysThinking(model) {
+    return /^claude-(?:fable-|mythos-|opus-5-5(?:-|$))/.test(model);
+}
+function noForcedTools(model) {
+    return /^claude-(?:(?:opus|sonnet)-5-5(?:-|$)|(?:fable|mythos)-5-1(?:-|$))/.test(model);
 }
 //# sourceMappingURL=anthropic.js.map

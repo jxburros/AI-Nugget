@@ -32,6 +32,7 @@ async function* run(opts, resolveResult) {
             yield emit(opts, { type: 'step_start', step });
             const calls = [];
             let stepText = '';
+            let providerState;
             let streamFailure;
             // In promptJson mode a tool directive must not leak into the visible
             // stream, so directive-looking text is withheld from `delta` events (still
@@ -65,6 +66,7 @@ async function* run(opts, resolveResult) {
                 if (event.type === 'error')
                     streamFailure = event.error;
                 if (event.type === 'done') {
+                    providerState = event.result.providerState;
                     usage = usage ? mergeUsage(usage, event.result.usage) : event.result.usage;
                     if (toolMode === 'promptJson' && calls.length === 0)
                         calls.push(...callsFromPromptJson(stepText));
@@ -85,7 +87,7 @@ async function* run(opts, resolveResult) {
             finalText = stepText;
             messages.push(toolMode === 'promptJson'
                 ? { role: 'assistant', content: stepText }
-                : { role: 'assistant', content: stepText, toolCalls: calls.length ? calls : undefined });
+                : { role: 'assistant', content: stepText, providerState, toolCalls: calls.length ? calls : undefined });
             if (calls.length === 0)
                 return yield* yieldDone('finished');
             for (const call of calls) {

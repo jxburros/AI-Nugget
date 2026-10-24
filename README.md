@@ -2,7 +2,7 @@
 
 <img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
 
-**Version 0.7.0** · [What's changed since 0.6.0](#whats-changed-since-060) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.7.1** · [What's changed since 0.6.0](#whats-changed-since-060) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -117,6 +117,20 @@ new AIHandler({
   model↔tool loop over the full pipeline, streamed `AgentEvent`s, budgets with
   honest `stopReason`s, an `ApprovalGate` for side-effecting tools, and
   `native`/`promptJson`/`auto` tool modes.
+
+## Anthropic compatibility
+
+Claude Opus/Sonnet/Haiku 5.5 requests omit unsupported sampling parameters.
+Modern Claude JSON schemas use `output_config.format`; requests without a schema
+use a JSON instruction and emit `json_mode_downgraded`. Older models retain the
+forced-tool fallback. Explicit forced-tool choices on models that reject them
+fail with `invalid_request` rather than silently changing the choice.
+
+Anthropic results include opaque `providerState`. Custom tool loops must copy it
+onto the corresponding assistant `ChatMessage`; `runAgent` does this automatically.
+Keep it unchanged and private: it contains signed thinking blocks needed for replay,
+not display or telemetry data. Replay is limited to the same provider and model.
+See [provider details](./docs/providers.md#anthropic-compatibility).
 
 ## What's changed since 0.6.0
 

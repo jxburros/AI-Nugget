@@ -151,7 +151,7 @@ export class AIHandler {
               }
               continue;
             }
-            if (event.type === 'delta' || event.type === 'tool_call') emittedOutput = true;
+            if (event.type === 'delta' || event.type === 'tool_call' || event.type === 'reasoning') emittedOutput = true;
             if (event.type === 'delta' && stripper) {
               // Inline reasoning never reaches `delta`; it rides the reasoning channel like a
               // provider-native thinking field would.

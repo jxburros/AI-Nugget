@@ -9,7 +9,7 @@ another copy of the SSE loop. `adapterFor(provider)` lives once, in
 | Engine | Providers | Streaming | Tools | JSON mode |
 |---|---|---|---|---|
 | `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `cohere`, `perplexity`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
-| `anthropic` | `anthropic` | SSE (`content_block_delta`) | `tool_use` blocks (streamed) | forced-tool JSON mode |
+| `anthropic` | `anthropic` | SSE (`content_block_delta`) | `tool_use` blocks (streamed) | native JSON schema on modern Claude; legacy forced-tool fallback |
 | `google` | `google` | SSE (`streamGenerateContent`) | `functionDeclarations` | `responseMimeType` |
 | `ollama` | `ollama` | NDJSON | native `tools` | `format: json` |
 
@@ -79,8 +79,10 @@ sending a request the provider will reject:
 
 - **Google/Gemini** rejects `responseMimeType: application/json` alongside
   function declarations.
-- **Anthropic** implements JSON mode as a forced `json_output` tool, which can't
-  coexist with the caller's own tools.
+- **Legacy Anthropic models** implement JSON mode as a forced `json_output` tool,
+  which cannot coexist with caller tools. Modern Claude uses native JSON schemas
+  and supports both together. Schema-less modern JSON requests emit the same
+  downgrade event and use an instruction instead of constrained decoding.
 
 The downgrade is **not silent**: both engines emit a
 `{ type: 'context', kind: 'json_mode_downgraded', data: { reason, provider } }`
@@ -215,3 +217,35 @@ that's app policy, same as governance. The pattern that works:
    back to an app-configured default for connections without discovery.
 
 See `examples/model-picker.mjs` for a runnable reference.
+
+## Anthropic compatibility
+
+As of 0.7.1, known Claude Opus 4.7/4.8, Opus/Sonnet 5/5.5, Haiku 5.5,
+Fable/Mythos 5/5.1 and Mythos Preview omit sampling parameters and use adaptive
+thinking plus `output_config.effort` when effort is requested. `minimal` maps to
+`low`. `none` rejects always-thinking models with a typed `invalid_request`;
+Sonnet 5.5 uses `between_tools` (no up-front thinking), and models that support
+thinking off use `disabled`. Native `providerOptions` can set exact thinking and
+effort fields; sampling parameters are still omitted on these models.
+
+Modern JSON output with a supplied schema uses `output_config.format` and can
+coexist with tools. Supply an Anthropic-compatible JSON schema, including
+`additionalProperties: false` on objects. Schema-less JSON is instruction-only
+with a `json_mode_downgraded` context event. Legacy JSON keeps its forced-tool
+implementation. Explicit forced tools on Opus/Sonnet 5.5 and Fable/Mythos 5.1
+fail locally rather than silently becoming automatic tool selection.
+
+The engine classifies Anthropic SSE error events as typed failures (including
+mid-stream overloads), and maps refusals to `content_filter`. `providerState`
+on results retains complete ordered content blocks, including thinking signatures
+and redacted thinking. Custom loops must copy it unchanged to the assistant message;
+`runAgent` does so automatically. Do not display, log, or put this state in telemetry.
+Do not edit earlier system/tools/history while replaying signed thinking; do not
+reuse it across accounts, providers or models. It is in-memory turn state, not a
+replacement for an application's conversation persistence policy.
+
+Verification: these changes are mock-verified in Node and Chromium; the historical
+live-verified provider row does not claim live coverage of these new model rules.
+Sources: [migration guide](https://platform.claude.com/docs/en/models/opus-5-5/migration-guide),
+[structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
+[thinking](https://platform.claude.com/docs/en/build-with-claude/thinking).
