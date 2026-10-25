@@ -3,6 +3,28 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-10-25 - Claude — 0.7.3
+
+Release-pipeline fix; no source or package-content change from 0.7.2.
+
+### Changed
+- `.github/workflows/publish.yml`: both publish jobs (npm and GitHub Packages)
+  now pass the tarball as `./package-output/<name>.tgz`. The bare
+  `package-output/<name>.tgz` made npm 11 treat it as GitHub `owner/repo`
+  shorthand (`git ls-remote ssh://git@github.com/package-output/...`), which
+  failed both publish jobs of the 0.7.1 and 0.7.2 Release runs.
+- Version 0.7.3 (release.json, package.json, package-lock.json,
+  nugget/VERSION.txt, README, UPGRADING, release notes).
+
+### Not completed
+- None.
+
+### Notes
+- Validation: reproduced the failure locally with npm 11.19.0
+  (`npm publish package-output/x.tgz --dry-run` → the same `git ls-remote`
+  error) and confirmed `./package-output/x.tgz` dry-runs a publish of the
+  package; `build:nugget` regenerated only `nugget/VERSION.txt`.
+
 ## 2026-10-25 - Claude — 0.7.2
 
 Follow-up to a cross-repo sync audit (AI Nugget ↔ JX Runtime ↔ AI Server
