@@ -11,7 +11,7 @@ nugget through its published `exports` map (`file:../../..`), and each has a
 | `nextjs/` | Next.js App Router (`app/api/chat/route.ts`) | `next build` succeeds — the bundler resolves the package and the route type-checks |
 | `workers/` | Cloudflare Workers / edge | `wrangler deploy --dry-run` bundles for workerd, which fails on any Node built-in — the real isomorphism test |
 | `ollama-desktop/` | Local Ollama, no key | Health probe, live model discovery, prewarm, and NDJSON streaming on the zero-key local path |
-| `module-resolution/` | Packaging | Every entry point (root and `/agent`) resolves under both `import` and `require` |
+| `module-resolution/` | Packaging | Every entry point (root and `/agent`) resolves under both `import` and `require`, and its types under TypeScript `node10`, `node16` (ESM), and `bundler` resolution |
 
 Run one locally:
 

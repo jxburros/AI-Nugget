@@ -5,6 +5,7 @@
  */
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 
@@ -36,4 +37,35 @@ const handler = new cjs.AIHandler({ keySource: cjs.envKeySource(), policy: cjs.a
 assert.equal(typeof handler.chat, 'function');
 assert.equal(typeof handler.stream, 'function');
 
-console.log('module-resolution integration OK (ESM + CJS, root + /agent)');
+// Types: a TypeScript consumer must reach both entry points' declarations
+// under every common moduleResolution. `node10` (the default for
+// `module: commonjs`, e.g. older Express/Nest backends) ignores `exports`
+// entirely, so `/agent` resolves only through `typesVersions` in package.json.
+const ts = require('typescript');
+const fixture = fileURLToPath(new URL('./types-check.ts', import.meta.url));
+const modes = [
+  { name: 'node10', module: ts.ModuleKind.CommonJS, moduleResolution: ts.ModuleResolutionKind.Node10 },
+  // The fixture is ESM (package "type": "module"), so this is node16 from an ESM file.
+  { name: 'node16', module: ts.ModuleKind.Node16, moduleResolution: ts.ModuleResolutionKind.Node16 },
+  { name: 'bundler', module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler },
+];
+for (const mode of modes) {
+  const program = ts.createProgram([fixture], {
+    noEmit: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    lib: ['lib.es2022.d.ts', 'lib.dom.d.ts'],
+    types: [],
+    module: mode.module,
+    moduleResolution: mode.moduleResolution,
+  });
+  const diagnostics = ts.getPreEmitDiagnostics(program);
+  const text = ts.formatDiagnostics(diagnostics, {
+    getCanonicalFileName: (f) => f,
+    getCurrentDirectory: () => process.cwd(),
+    getNewLine: () => '\n',
+  });
+  assert.equal(diagnostics.length, 0, `types must resolve under moduleResolution ${mode.name}:\n${text}`);
+}
+
+console.log('module-resolution integration OK (ESM + CJS, root + /agent; types under node10, node16, bundler)');

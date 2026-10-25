@@ -52,7 +52,9 @@ No key? Point at a local model instead — same code, no `keyRef`:
 const conn = { id: 'local', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434' };
 ```
 
-CommonJS works too: `const { AIHandler } = require('@jxburros/ai-nugget')`.
+CommonJS works too: `const { AIHandler } = require('@jxburros/ai-nugget')`. TypeScript
+finds the root and `/agent` types under `node10` (classic `module: commonjs`)
+and `bundler` resolution, and under `node16`/`nodenext` from ESM files.
 
 For a running server, copy a starter from
 [`examples/integrations/`](./examples/integrations/) — Express, Next.js,

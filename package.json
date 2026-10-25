@@ -44,6 +44,13 @@
       "default": "./dist/agent/index.js"
     }
   },
+  "typesVersions": {
+    "*": {
+      "agent": [
+        "./dist/agent/index.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist/**/*.js",
     "dist/**/*.d.ts",
