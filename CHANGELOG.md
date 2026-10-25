@@ -3,10 +3,11 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
-## 2026-10-25 - Claude
+## 2026-10-25 - Claude — 0.7.2
 
 Follow-up to a cross-repo sync audit (AI Nugget ↔ JX Runtime ↔ AI Server
-Studio). No version bump; these changes land on top of the unpublished 0.7.1.
+Studio). Patch release on top of 0.7.1; neither 0.7.1 nor 0.7.2 is published to
+npm yet (registry `latest` is 0.7.0).
 
 ### Changed
 - **`typesVersions` in `package.json`** maps `@jxburros/ai-nugget/agent` to
@@ -25,6 +26,10 @@ Studio). No version bump; these changes land on top of the unpublished 0.7.1.
   used a nonexistent `connect()` helper and now builds a plain `Connection`.
 - New engine test: `openai-compat` sends `stream_options` from `providerOptions`
   and reports the server's usage frame as `estimated: false`.
+- **Version 0.7.2**: `release.json`, `package.json`, `package-lock.json`,
+  `.release/notes/ai-nugget/0.7.2.md`, README header, `UPGRADING.md`, and the
+  regenerated `nugget/VERSION.txt`. Patch, not minor: no provider profile or
+  runtime behavior was added.
 - Stale docs: friction-report links in `UPGRADING.md` and the archived persona
   review; README version section restructured as "What's changed in 0.7.x"
   (0.7.1 + 0.7.0) plus a note that npm `latest` is still 0.7.0;
@@ -38,6 +43,7 @@ Studio). No version bump; these changes land on top of the unpublished 0.7.1.
   Test's second criterion: without it streamed usage is honestly marked
   `estimated: true` (nothing leaks, hangs, fakes success, or drops output), and
   the one-line `providerOptions` opt-in already covers it on an existing seam.
+- No registry publication or Release workflow run.
 - Pre-existing, not addressed: a CommonJS file under `node16`/`nodenext`
   resolution gets TS1479 on `import` from this package, because the `types`
   condition points at ESM declarations for `require` too.

@@ -2,7 +2,7 @@
 
 <img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
 
-**Version 0.7.1** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.7.2** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -26,9 +26,10 @@ Requires Node `^20.19.0` or `>=22.12.0` ([why](./docs/distribution.md#requiremen
 npm install @jxburros/ai-nugget
 ```
 
-> **0.7.1 is not on npm yet.** The registry's `latest` is still 0.7.0, so the
-> command above installs 0.7.0 (no 0.7.1 Anthropic fixes). Until 0.7.1 is
-> published, pin a commit from this repository
+> **0.7.1 and 0.7.2 are not on npm yet.** The registry's `latest` is still
+> 0.7.0, so the command above installs 0.7.0 (without the 0.7.1 Anthropic fixes
+> or the 0.7.2 `/agent` types fix). Until they are published, pin a commit from
+> this repository
 > (`npm install github:jxburros/AI-Nugget#<commit>`) or vendor `nugget/` — see
 > [distribution paths](./docs/distribution.md#distribution-paths).
 
@@ -141,6 +142,15 @@ not display or telemetry data. Replay is limited to the same provider and model.
 See [provider details](./docs/providers.md#anthropic-compatibility).
 
 ## What's changed in 0.7.x
+
+### 0.7.2
+
+**`/agent` types under classic `node10` resolution.** A `typesVersions` entry
+lets TypeScript projects on `module: commonjs` (default `node10` resolution)
+resolve `@jxburros/ai-nugget/agent`. Otherwise documentation only — notably the
+[JX Runtime guidance](./docs/providers.md#pointing-at-a-jx-runtime-server) for
+JX 1.5, including the `stream_options` opt-in for real streamed token counts.
+No runtime behavior changed.
 
 ### 0.7.1
 

@@ -1,5 +1,11 @@
 # Upgrading
 
+## 0.7.1 → 0.7.2
+
+No code changes required. `package.json` gains a `typesVersions` entry so
+TypeScript on classic `node10` resolution can find the `/agent` types; consumers
+on `node16`/`nodenext`/`bundler` resolve exactly as before.
+
 ## 0.7.0 → 0.7.1
 
 Custom Anthropic tool loops should copy `result.providerState` onto their assistant
