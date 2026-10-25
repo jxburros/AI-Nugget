@@ -108,7 +108,8 @@ jobs:
         RELEASE_CHANNEL: ${{ inputs.channel }}
       run: |
         set -euo pipefail
-        file=$(find package-output -maxdepth 1 -name '*.tgz' -print -quit)
+        # ./ prefix: npm 11 reads a bare "dir/file.tgz" as GitHub owner/repo shorthand.
+        file=$(find ./package-output -maxdepth 1 -name '*.tgz' -print -quit)
         if [ "$DRY_RUN" = true ]; then
           npm publish "$file" --ignore-scripts --access public --registry="$REGISTRY" --dry-run
           exit 0
@@ -154,7 +155,8 @@ jobs:
         RELEASE_CHANNEL: ${{ inputs.channel }}
       run: |
         set -euo pipefail
-        file=$(find package-output -maxdepth 1 -name '*.tgz' -print -quit)
+        # ./ prefix: npm 11 reads a bare "dir/file.tgz" as GitHub owner/repo shorthand.
+        file=$(find ./package-output -maxdepth 1 -name '*.tgz' -print -quit)
         if [ "$DRY_RUN" = true ]; then
           npm publish "$file" --ignore-scripts --access public --registry="$REGISTRY" --dry-run
           exit 0

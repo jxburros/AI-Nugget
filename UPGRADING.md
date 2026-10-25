@@ -1,5 +1,9 @@
 # Upgrading
 
+## 0.7.2 → 0.7.3
+
+No changes: 0.7.3 republishes the 0.7.2 package contents after a release-pipeline fix.
+
 ## 0.7.1 → 0.7.2
 
 No code changes required. `package.json` gains a `typesVersions` entry so
