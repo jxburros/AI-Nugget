@@ -27,7 +27,7 @@ runtime dependencies, one enforced call pipeline, honest typed errors instead
 of silent fallbacks, and a redaction layer that's actually been thought
 through rather than bolted on. It has already survived contact with a real
 consumer app (see
-[`2026-08-09-ai-server-studio-friction-report.md`](./2026-08-09-ai-server-studio-friction-report.md))
+[`2026-08-09-ai-server-studio-friction-report.md`](../../archive/2026-08-09-ai-server-studio-friction-report.md))
 and had every one of that report's 26 suggestions implemented in the very next
 release — that's a stronger adoption signal than most libraries this size ever
 get.

@@ -172,16 +172,61 @@ sentinel — no library changes needed). Connect through the `openai-compat`
 profile with the `/v1` suffix included in `baseUrl`:
 
 ```ts
-connect({ provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' });
+const jx = { id: 'jx', provider: 'openai-compat', baseUrl: 'http://127.0.0.1:8712/v1' };
 ```
 
-JX Runtime allows unauthenticated requests from the local machine, so `keyRef`
-can be omitted (`openai-compat` is `keyOptional`). Its error body is
-`{ error: { code, message, details } }` — no `type` field — which `classify()`
-handles fine since it only reads HTTP status and body text, not `error.type`.
-Note JX Runtime does not send CORS headers by default, so a browser-hosted
-caller needs JX Runtime's CORS config enabled for that origin; server-side
-callers are unaffected.
+JX Runtime allows unauthenticated requests from the local machine, so a
+server-side caller on the same host can omit `keyRef` (`openai-compat` is
+`keyOptional`).
+
+**Errors.** JX Runtime's error body is
+`{ error: { code, message, type, correlationId, details } }` — an OpenAI-style
+coarse `type`, a stable JX `code` (e.g. `MODEL_BUSY`, `MODEL_INSUFFICIENT_VRAM`),
+a `correlationId` to quote to the operator, and `details` (always carrying
+`retryable`, sometimes a `repair` plan). `classify()` maps the failure from the
+HTTP status (plus a context-length text check on 400/422) and never reads
+`error.type`, so this shape needs no library changes. `AIError.raw` keeps a
+redacted excerpt of the first 200 characters of the body, which normally
+includes the JX `code`; a long `message` can push `correlationId` past it.
+
+**Browser callers.** JX Runtime sends no CORS headers by default, so a
+browser-hosted caller needs its origin added to JX's
+`network.cors.allowedOrigins`; server-side callers are unaffected. Since JX
+1.5.0 a page on an allow-listed origin is **not** treated as trusted-local: it
+must send an access key (pair it, or give it a scoped key) even in
+`auth.mode: 'auto'`. Supply that key through your `KeySource` as for any other
+provider.
+
+**Streamed token counts.** `openai-compat` does not send
+`stream_options.include_usage` by default (many OpenAI-compatible local servers
+reject or ignore it), so streamed usage comes back `estimated: true`. JX Runtime
+forwards `stream_options` to its engine and passes the engine's usage frame
+through, so opt in per call to get the engine's real counts:
+
+```ts
+const req = {
+  model: 'qwen2.5-7b-instruct',
+  messages: [{ role: 'user', content: 'Hello!' }],
+  providerOptions: { stream_options: { include_usage: true } },
+};
+for await (const event of handler.stream(jx, req)) {
+  if (event.type === 'done') console.log(event.result.usage); // estimated: false when JX's engine reports it
+}
+```
+
+Whether a usage frame is produced is the engine's decision (older
+`llama-server` builds ignore the field); when none arrives the result is still
+honestly `estimated: true`. There is deliberately no dedicated `jx-runtime`
+profile: the opt-in is one line on an existing seam, and without it nothing is
+hidden or faked.
+
+**Discovery.** `handler.listModels()` reads JX's `/v1/models` through the
+standard OpenAI path and returns model ids. JX's non-standard per-model
+`capabilities` extension is an object (`{ chat, tools, vision, …,
+max_context }`), not the string list `ModelInfo.capabilities` holds, and its
+`max_model_len` is not one of the context-window fields the nugget reads — so
+neither is mapped onto `ModelInfo`. An app that wants them reads `/v1/models`
+itself.
 
 **Grok/xAI is not blocked and is never officially integrated** — point
 `openai-compat` at any endpoint if you must; that is your configuration, not a

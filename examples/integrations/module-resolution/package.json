@@ -2,7 +2,8 @@
   "name": "ai-nugget-integration-module-resolution",
   "private": true,
   "type": "module",
-  "description": "Proves the package's exports map resolves under both import and require",
+  "description": "Proves the package's exports map resolves under both import and require, and its types under TypeScript node10, node16 (ESM) and bundler resolution",
   "scripts": { "verify": "node verify.mjs" },
-  "dependencies": { "@jxburros/ai-nugget": "file:../../.." }
+  "dependencies": { "@jxburros/ai-nugget": "file:../../.." },
+  "devDependencies": { "typescript": "^5.8.3" }
 }

@@ -12,7 +12,7 @@ has a `verify` script CI runs on every push and PR
 
 | Starter | Host toolchain | What a failure here would mean |
 |---|---|---|
-| `module-resolution` | Node ESM + CJS | The `exports` map is broken, or a named export resolves to `undefined` under `require()` (the classic dual-package hazard) |
+| `module-resolution` | Node ESM + CJS, `tsc` | The `exports` map is broken, a named export resolves to `undefined` under `require()` (the classic dual-package hazard), or a TypeScript consumer can't find the root or `/agent` types under `node10`, `node16` (ESM), or `bundler` resolution (`node10` reaches `/agent` only via `typesVersions`) |
 | `express` | Node + Express | The package doesn't resolve in a plain Node server, or the `StreamEvent` → SSE bridge is broken |
 | `ollama-desktop` | Local runtime, no key | The zero-key local path regressed — health probe, model discovery, or NDJSON streaming |
 | `workers` | `wrangler deploy --dry-run` (workerd/esbuild) | Something in the import graph reaches for a Node built-in — the isomorphism invariant broke |

@@ -110,6 +110,28 @@ describe('openaiChat engine contract', () => {
     expect(body.stream_options).toBeUndefined();
   });
 
+  it('opts openai-compat into streamed usage via providerOptions.stream_options (JX Runtime recipe)', async () => {
+    // Without the opt-in, openai-compat never asks for usage and the result is estimated.
+    const { calls: plain } = mockFetch(sseResponse([{ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }]));
+    const conn = resolved('openai-compat', { baseUrl: 'http://127.0.0.1:8712/v1' });
+    const before = (await collect(adapterFor('openai-compat').stream(conn, chatReq()))).at(-1);
+    expect((plain[0]!.body as Record<string, any>).stream_options).toBeUndefined();
+    expect(before?.type === 'done' && before.result.usage.estimated).toBe(true);
+    vi.restoreAllMocks();
+
+    // With it, the request carries include_usage and the server's final usage frame
+    // (empty `choices`, before [DONE]) is reported as real, not estimated.
+    const { calls } = mockFetch(sseResponse([
+      { choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] },
+      { choices: [], usage: { prompt_tokens: 11, completion_tokens: 1 } },
+    ]));
+    const events = await collect(adapterFor('openai-compat').stream(conn, chatReq({ providerOptions: { stream_options: { include_usage: true } } })));
+    expect(calls[0]!.url).toBe('http://127.0.0.1:8712/v1/chat/completions');
+    expect((calls[0]!.body as Record<string, any>).stream_options).toEqual({ include_usage: true });
+    const done = events.at(-1);
+    expect(done?.type === 'done' && done.result.usage).toEqual({ inputTokens: 11, outputTokens: 1, estimated: false });
+  });
+
   it('classifies 401 / 429 / 500 with retryability', async () => {
     for (const [status, kind, retryable] of [[401, 'auth', false], [429, 'rate_limit', true], [500, 'server', true]] as const) {
       mockFetch(textResponse('boom', status));

@@ -3,6 +3,57 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-10-25 - Claude — 0.7.2
+
+Follow-up to a cross-repo sync audit (AI Nugget ↔ JX Runtime ↔ AI Server
+Studio). Patch release on top of 0.7.1; neither 0.7.1 nor 0.7.2 is published to
+npm yet (registry `latest` is 0.7.0).
+
+### Changed
+- **`typesVersions` in `package.json`** maps `@jxburros/ai-nugget/agent` to
+  `dist/agent/index.d.ts`, so TypeScript consumers on classic `node10`
+  resolution (the default for `module: commonjs`, e.g. AI Server Studio's
+  backend) can resolve the `/agent` types; `exports` is invisible there. The
+  `module-resolution` integration starter now type-checks root and `/agent`
+  imports under `node10`, `node16` (ESM) and `bundler` (it fails without the
+  mapping).
+- **`docs/providers.md` JX Runtime section** updated for JX 1.5: error bodies
+  are `{ error: { code, message, type, correlationId, details } }` (the old
+  "no `type` field" claim was wrong); browser callers on an allow-listed CORS
+  origin must send a key even in `auth.mode: 'auto'`; streamed usage can be made
+  real with `providerOptions: { stream_options: { include_usage: true } }`; JX's
+  `/v1/models` `capabilities` object is not mapped onto `ModelInfo`. The example
+  used a nonexistent `connect()` helper and now builds a plain `Connection`.
+- New engine test: `openai-compat` sends `stream_options` from `providerOptions`
+  and reports the server's usage frame as `estimated: false`.
+- **Version 0.7.2**: `release.json`, `package.json`, `package-lock.json`,
+  `.release/notes/ai-nugget/0.7.2.md`, README header, `UPGRADING.md`, and the
+  regenerated `nugget/VERSION.txt`. Patch, not minor: no provider profile or
+  runtime behavior was added.
+- Stale docs: friction-report links in `UPGRADING.md` and the archived persona
+  review; README version section restructured as "What's changed in 0.7.x"
+  (0.7.1 + 0.7.0) plus a note that npm `latest` is still 0.7.0;
+  `docs/state-of-the-nugget.md` 0.6.0-release item marked done; `design.md`
+  now describes Studio's actual adoption (local chat and discovery go through
+  Studio's own runtime layer, the handler serves cloud chat and agent/background
+  work).
+
+### Not completed
+- No dedicated `jx-runtime` provider profile. It fails the Feature Admission
+  Test's second criterion: without it streamed usage is honestly marked
+  `estimated: true` (nothing leaks, hangs, fakes success, or drops output), and
+  the one-line `providerOptions` opt-in already covers it on an existing seam.
+- No registry publication or Release workflow run.
+- Pre-existing, not addressed: a CommonJS file under `node16`/`nodenext`
+  resolution gets TS1479 on `import` from this package, because the `types`
+  condition points at ESM declarations for `require` too.
+
+### Notes
+- Validation: `npm run typecheck`, `npm run lint`, `npm test` (229 passed, 6
+  live tests skipped), `npm run test:browser` (229 passed, headless Chromium),
+  `npm run build` and `npm run build:nugget` (no `dist/`/`nugget/` drift), and
+  `examples/integrations/module-resolution` `npm run verify` all passed.
+
 ## 2026-10-24 - Codex — 0.7.1
 
 ### Changed

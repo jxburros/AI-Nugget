@@ -2,7 +2,7 @@
 
 <img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
 
-**Version 0.7.1** · [What's changed since 0.6.0](#whats-changed-since-060) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.7.2** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -25,6 +25,13 @@ Requires Node `^20.19.0` or `>=22.12.0` ([why](./docs/distribution.md#requiremen
 ```bash
 npm install @jxburros/ai-nugget
 ```
+
+> **0.7.1 and 0.7.2 are not on npm yet.** The registry's `latest` is still
+> 0.7.0, so the command above installs 0.7.0 (without the 0.7.1 Anthropic fixes
+> or the 0.7.2 `/agent` types fix). Until they are published, pin a commit from
+> this repository
+> (`npm install github:jxburros/AI-Nugget#<commit>`) or vendor `nugget/` — see
+> [distribution paths](./docs/distribution.md#distribution-paths).
 
 ```ts
 import { AIHandler, envKeySource } from '@jxburros/ai-nugget';
@@ -52,7 +59,9 @@ No key? Point at a local model instead — same code, no `keyRef`:
 const conn = { id: 'local', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434' };
 ```
 
-CommonJS works too: `const { AIHandler } = require('@jxburros/ai-nugget')`.
+CommonJS works too: `const { AIHandler } = require('@jxburros/ai-nugget')`. TypeScript
+finds the root and `/agent` types under `node10` (classic `module: commonjs`)
+and `bundler` resolution, and under `node16`/`nodenext` from ESM files.
 
 For a running server, copy a starter from
 [`examples/integrations/`](./examples/integrations/) — Express, Next.js,
@@ -132,7 +141,28 @@ Keep it unchanged and private: it contains signed thinking blocks needed for rep
 not display or telemetry data. Replay is limited to the same provider and model.
 See [provider details](./docs/providers.md#anthropic-compatibility).
 
-## What's changed since 0.6.0
+## What's changed in 0.7.x
+
+### 0.7.2
+
+**`/agent` types under classic `node10` resolution.** A `typesVersions` entry
+lets TypeScript projects on `module: commonjs` (default `node10` resolution)
+resolve `@jxburros/ai-nugget/agent`. Otherwise documentation only — notably the
+[JX Runtime guidance](./docs/providers.md#pointing-at-a-jx-runtime-server) for
+JX 1.5, including the `stream_options` opt-in for real streamed token counts.
+No runtime behavior changed.
+
+### 0.7.1
+
+**Anthropic correctness for modern Claude models.** Unsupported sampling
+parameters are omitted, JSON schemas use native structured output, and signed
+thinking is preserved for tool-loop replay through the new opaque
+`providerState` on results (`runAgent` copies it for you; custom tool loops must
+copy it onto the assistant message). SSE API errors become typed failures.
+Details in [Anthropic compatibility](#anthropic-compatibility),
+[UPGRADING.md](./UPGRADING.md#070--071), and the [changelog](./CHANGELOG.md).
+
+### 0.7.0
 
 **0.7.0 is backward-compatible for ordinary consumers** — the first two changes are additive; the third changes what `delta` carries for reasoning models (see UPGRADING). Full detail in the
 [changelog](./CHANGELOG.md) and [UPGRADING.md](./UPGRADING.md#06x--070).

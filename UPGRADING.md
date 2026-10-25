@@ -1,5 +1,11 @@
 # Upgrading
 
+## 0.7.1 → 0.7.2
+
+No code changes required. `package.json` gains a `typesVersions` entry so
+TypeScript on classic `node10` resolution can find the `/agent` types; consumers
+on `node16`/`nodenext`/`bundler` resolve exactly as before.
+
 ## 0.7.0 → 0.7.1
 
 Custom Anthropic tool loops should copy `result.providerState` onto their assistant
@@ -94,7 +100,7 @@ signature changed and no default behavior changed, so an app on 0.4.x can bump
 without code edits and adopt the new capabilities as needed.
 
 The numbers in brackets are the suggestion numbers from the AI Server Studio
-production friction report (`docs/reviews/2026-08-09-ai-server-studio-friction-report.md`),
+production friction report ([`docs/archive/2026-08-09-ai-server-studio-friction-report.md`](./docs/archive/2026-08-09-ai-server-studio-friction-report.md)),
 so you can trace each change back to the friction it resolves.
 
 ### Packaging
