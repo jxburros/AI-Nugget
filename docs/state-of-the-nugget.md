@@ -241,10 +241,10 @@ Not urgent, in rough order of value:
 4. **Watch the agent layer.** At 458 lines `loop.ts` is the largest single file
    and the one most likely to attract scope creep. It is the first place the
    Feature Admission Test should be applied strictly.
-5. **Consider a 0.6.0 release.** The changes are behavior-compatible with two
-   documented exceptions (the new `not_found` error kind and the policy notice),
-   `UPGRADING.md` covers both, and the backlog being empty is a natural cut
-   point.
+5. **Consider a 0.6.0 release.** *Done since this snapshot:* 0.6.0 was cut
+   (and published to npm) with the `not_found` error kind and the policy notice
+   documented in `UPGRADING.md`, followed by 0.7.0 and 0.7.1 — see the
+   [changelog](../CHANGELOG.md) for current release state.
 
 ## Verification for this snapshot
 

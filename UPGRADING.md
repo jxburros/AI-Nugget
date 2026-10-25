@@ -94,7 +94,7 @@ signature changed and no default behavior changed, so an app on 0.4.x can bump
 without code edits and adopt the new capabilities as needed.
 
 The numbers in brackets are the suggestion numbers from the AI Server Studio
-production friction report (`docs/reviews/2026-08-09-ai-server-studio-friction-report.md`),
+production friction report ([`docs/archive/2026-08-09-ai-server-studio-friction-report.md`](./docs/archive/2026-08-09-ai-server-studio-friction-report.md)),
 so you can trace each change back to the friction it resolves.
 
 ### Packaging
