@@ -3,6 +3,29 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-10-25 - Claude — 0.7.4
+
+Release-pipeline fix; no source or package-content change from 0.7.3.
+
+### Changed
+- `.github/workflows/publish.yml`, `.github/workflows/release-validation.yml`
+  and `.release/README.md`: release-infrastructure pin `181636b` → `d7f42f9`.
+  The 0.7.3 Release run published to npm and GitHub Packages, then its final
+  `publish` job failed at `gh api repos/jxburros/AI-Nugget/releases/tags/v0.7.3`
+  (HTTP 404): `181636b` looks up a just-created draft by tag, which GitHub does
+  not resolve for drafts. `d7f42f9` finds drafts in the release list and waits
+  for a new draft to appear there. The reusable workflow inputs are unchanged.
+- Version 0.7.4 (release.json, package.json, package-lock.json,
+  nugget/VERSION.txt, README, UPGRADING, release notes).
+
+### Not completed
+- 0.7.3 is on npm and has a `v0.7.3` tag but no GitHub release; this change
+  does not backfill it.
+
+### Notes
+- Validation: `release.mjs validate` from the `d7f42f9` toolkit passes against
+  `origin/main`; `build:nugget` regenerated only `nugget/VERSION.txt`.
+
 ## 2026-10-25 - Claude — 0.7.3
 
 Release-pipeline fix; no source or package-content change from 0.7.2.
