@@ -3,6 +3,30 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-10-27 - Codex — 0.7.5
+
+### Changed
+- Added eleven profiles: MiniMax, Z.AI, DashScope, Hugging Face, DeepInfra,
+  SambaNova, NVIDIA NIM, Cloudflare, Bedrock, Vertex and Azure OpenAI v1.
+- Added explicit Responses and native Converse/ConverseStream protocols,
+  cloud endpoint coordinates, KeySource request signing and injectable transport.
+  New compatible profiles preserve assistant reasoning/tool state for replay.
+- Added handler-level cloud/protocol tests and executable QAI-ality levels 1–13;
+  tightened live tool-loop assertions and added a configurable manual smoke job.
+- Documented actual verification coverage, cloud authentication, consumer rollout,
+  and the proposed optional media/document/retrieval operations plan.
+
+### Not completed
+- Paid live-provider tests: no configured provider credentials. Publishing and
+  production releases are separate from these reviewable changes.
+- Optional operations (audit item 13) are planned, not implemented.
+
+### Notes
+- Validation: Node and Chromium contract suites, typecheck, lint, build and
+  generated nugget checks; npm audit reports zero vulnerabilities on 2026-10-27.
+- Existing issue #91's vulnerability count was not reproduced; #89 is addressed
+  by `.ai/qa.yaml`. No issue decisions or labels were changed automatically.
+
 ## 2026-10-25 - Claude — 0.7.4
 
 Release-pipeline fix; no source or package-content change from 0.7.3.

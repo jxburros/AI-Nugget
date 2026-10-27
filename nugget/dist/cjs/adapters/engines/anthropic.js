@@ -54,7 +54,7 @@ class AnthropicAdapter {
             yield { type: 'context', kind: 'json_mode_downgraded', data: { provider: conn.provider, reason: 'Claude native JSON outputs require a schema; using a JSON instruction without constrained decoding.' } };
         }
         try {
-            const res = await (0, transport_js_1.postResponse)(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
+            const res = await (0, transport_js_1.postResponse)(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider, conn.fetch);
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
                 const data = await res.json();
@@ -209,6 +209,7 @@ class AnthropicAdapter {
             headers: conn.headers,
             timeoutMs: Math.min(conn.timeoutMs ?? base_js_1.DEFAULT_TIMEOUT_MS, 15_000),
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const rows = Array.isArray((0, util_js_1.asRecord)(data)?.data) ? (0, util_js_1.asRecord)(data).data : [];
         return rows

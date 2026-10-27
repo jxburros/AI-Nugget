@@ -37,7 +37,7 @@ class OllamaAdapter {
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
-            const res = await (0, transport_js_1.postResponse)((0, util_js_1.joinUrl)(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider);
+            const res = await (0, transport_js_1.postResponse)((0, util_js_1.joinUrl)(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
             for await (const value of (0, transport_js_1.ndjsonLines)(res)) {
                 timeout.bump();
                 const record = (0, util_js_1.asRecord)(value);
@@ -100,6 +100,7 @@ class OllamaAdapter {
             headers: conn.headers,
             timeoutMs: conn.timeoutMs ?? base_js_1.DEFAULT_TIMEOUT_MS,
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const models = Array.isArray((0, util_js_1.asRecord)(data)?.models) ? (0, util_js_1.asRecord)(data).models : [];
         const ids = models.map((model) => (0, util_js_1.asString)((0, util_js_1.asRecord)(model)?.name) ?? (0, util_js_1.asString)((0, util_js_1.asRecord)(model)?.model) ?? '').filter(Boolean);
@@ -124,6 +125,7 @@ class OllamaAdapter {
             body: JSON.stringify((0, util_js_1.applyProviderOptions)({ model: req.model, input: inputs }, req.providerOptions)),
             timeoutMs: conn.timeoutMs ?? base_js_1.DEFAULT_TIMEOUT_MS,
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const record = (0, util_js_1.asRecord)(data);
         const rows = Array.isArray(record?.embeddings) ? record.embeddings : [];
@@ -144,6 +146,7 @@ class OllamaAdapter {
             body: JSON.stringify({ model }),
             timeoutMs: Math.min(conn.timeoutMs ?? base_js_1.DEFAULT_TIMEOUT_MS, 15_000),
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const record = (0, util_js_1.asRecord)(data);
         const modelInfo = (0, util_js_1.asRecord)(record?.model_info);

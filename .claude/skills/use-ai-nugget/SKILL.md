@@ -20,12 +20,7 @@ model choice, prompts, secret storage, and policy.
 
 Two supported paths (see `README.md` → Distribution):
 
-1. **GitHub Packages (preferred).** Add a project `.npmrc`:
-   ```
-   @jxburros:registry=https://npm.pkg.github.com
-   //npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
-   ```
-   then `npm install @jxburros/ai-nugget`.
+1. **Public npm (preferred).** Run `npm install @jxburros/ai-nugget`. No GitHub Packages token is required.
 2. **Vendored `nugget/` (fallback).** Copy the repo's generated `nugget/` folder
    into the consuming repo. Its `VERSION.txt` carries a version + content hash so
    drift from the source of truth is detectable. Never hand-edit vendored files —

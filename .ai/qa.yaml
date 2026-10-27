@@ -1,0 +1,256 @@
+schema_version: 3
+kind: qa_levels_template
+project:
+  name: AI Nugget
+  app_type: Isomorphic TypeScript library
+  default_branch: main
+  package_manager: npm
+  node_version: "22"
+levels:
+  - level: 1
+    name: install
+    display_name: Install
+    description: Run the repository-defined install check.
+    tools: [node, npm]
+    commands:
+      - id: install
+        run: npm ci
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 2
+    name: node_contracts
+    display_name: Node Contracts
+    description: Run the repository-defined node contracts check.
+    tools: [node, npm]
+    commands:
+      - id: node_contracts
+        run: npm test
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 3
+    name: build
+    display_name: Build
+    description: Run the repository-defined build check.
+    tools: [node, npm]
+    commands:
+      - id: build
+        run: npm run build
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 4
+    name: browser_contracts
+    display_name: Browser Contracts
+    description: Run the repository-defined browser contracts check.
+    tools: [node, npm]
+    commands:
+      - id: browser_contracts
+        run: npm run test:browser
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 5
+    name: dependency_audit
+    display_name: Dependency Audit
+    description: Run the repository-defined dependency audit check.
+    tools: [node, npm]
+    commands:
+      - id: dependency_audit
+        run: npm audit --audit-level=moderate
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 6
+    name: provider_contracts
+    display_name: Provider Contracts
+    description: Run the repository-defined provider contracts check.
+    tools: [node, npm]
+    commands:
+      - id: provider_contracts
+        run: npm test -- tests/profiles.test.ts tests/cloud-providers.test.ts
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 7
+    name: cloud_protocols
+    display_name: Cloud Protocols
+    description: Run the repository-defined cloud protocols check.
+    tools: [node, npm]
+    commands:
+      - id: cloud_protocols
+        run: npm test -- tests/engine-cloud-protocols.test.ts
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 8
+    name: transport
+    display_name: Transport
+    description: Run the repository-defined transport check.
+    tools: [node, npm]
+    commands:
+      - id: transport
+        run: npm test -- tests/transport.test.ts
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 9
+    name: redaction
+    display_name: Redaction
+    description: Run the repository-defined redaction check.
+    tools: [node, npm]
+    commands:
+      - id: redaction
+        run: npm test -- tests/keys-redact.test.ts tests/redact-patterns.test.ts
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 10
+    name: agent_contracts
+    display_name: Agent Contracts
+    description: Run the repository-defined agent contracts check.
+    tools: [node, npm]
+    commands:
+      - id: agent_contracts
+        run: npm test -- tests/agent.test.ts
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 11
+    name: types
+    display_name: Types
+    description: Run the repository-defined types check.
+    tools: [node, npm]
+    commands:
+      - id: types
+        run: npm run typecheck
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 12
+    name: generated_artifacts
+    display_name: Generated Artifacts
+    description: Run the repository-defined generated artifacts check.
+    tools: [node, npm]
+    commands:
+      - id: generated_artifacts
+        run: npm run build && npm run build:nugget && git diff --exit-code -- dist nugget
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]
+  - level: 13
+    name: package_contents
+    display_name: Package Contents
+    description: Run the repository-defined package contents check.
+    tools: [node, npm]
+    commands:
+      - id: package_contents
+        run: npm pack --dry-run
+        required: true
+        success: {exit_code: 0}
+        failure: {exit_code_not: 0}
+    pass_when: [Command exits zero]
+    fail_when: [Command exits nonzero]
+    warn_when: []
+    skip_when: []
+    blocked_when: [Required tools or browser dependencies unavailable]
+    evidence:
+      capture: [command, exit_code, stdout, stderr]
+      write_to: [qa-report.md, qa-results.json]

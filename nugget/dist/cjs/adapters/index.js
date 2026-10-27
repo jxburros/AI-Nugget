@@ -6,9 +6,15 @@ const anthropic_js_1 = require("./engines/anthropic.js");
 const google_js_1 = require("./engines/google.js");
 const ollama_js_1 = require("./engines/ollama.js");
 const openaiChat_js_1 = require("./engines/openaiChat.js");
+const responses_js_1 = require("./engines/responses.js");
+const converse_js_1 = require("./engines/converse.js");
 const profiles_js_1 = require("./profiles.js");
-function adapterFor(provider, baseUrl) {
+function adapterFor(provider, baseUrl, protocol) {
     const profile = (0, profiles_js_1.profileFor)(provider, baseUrl);
+    if (protocol === 'converse')
+        return new converse_js_1.ConverseAdapter(provider);
+    if (protocol === 'responses')
+        return new responses_js_1.ResponsesAdapter(provider, profile);
     if (profile.engine === 'anthropic')
         return new anthropic_js_1.AnthropicAdapter(provider);
     if (profile.engine === 'google')

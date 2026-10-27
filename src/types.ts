@@ -16,6 +16,7 @@ export interface ContentPart {
 export interface ProviderState {
   provider: string;
   model: string;
+  protocol?: Connection['protocol'];
   content: Record<string, unknown>[];
 }
 
@@ -95,6 +96,12 @@ export interface Connection {
    */
   provider: KnownProvider | (string & {});
   baseUrl?: string;
+  /** Select the wire protocol explicitly; existing connections keep their default. */
+  protocol?: 'chat-completions' | 'responses' | 'converse';
+  /** Cloud endpoint coordinates. An explicit baseUrl takes precedence. */
+  cloud?: { region?: string; project?: string; location?: string; accountId?: string; workspace?: string; bedrockEndpoint?: 'runtime' | 'mantle' };
+  /** Override the profile's key header (e.g. Azure Entra bearer tokens). */
+  auth?: 'bearer' | 'api-key-header';
   keyRef?: KeyRef;
   timeoutMs?: number;
   headers?: Record<string, string>;
@@ -116,15 +123,22 @@ export type KeyRef =
 
 export interface KeySource {
   resolve(ref: KeyRef): Promise<
-    | { ok: true; apiKey: string | null }
+    | { ok: true; apiKey: string | null; authorize?: RequestAuthorizer }
     | { ok: false; reason: 'missing' | 'locked' | 'denied' }
   >;
 }
+
+/** Optional SDK-backed signing seam (e.g. AWS SigV4). Credentials stay in KeySource.
+ * Called for each HTTP attempt with the final URL/body and a bounded signal.
+ * Return a signed Request; preserve its URL, method, body and signal. */
+export type RequestAuthorizer = (request: Request) => Promise<Request>;
 
 export interface ResolvedConnection extends Connection {
   baseUrl: string;
   apiKey: string | null;
   headers: Record<string, string>;
+  /** Internal transport bound by the handler; never exposed to hooks. */
+  fetch?: typeof fetch;
 }
 
 export interface Usage {

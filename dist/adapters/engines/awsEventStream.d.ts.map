@@ -1,0 +1,1 @@
+{"version":3,"file":"awsEventStream.d.ts","sourceRoot":"","sources":["../../../src/adapters/engines/awsEventStream.ts"],"names":[],"mappings":"AAEA,kFAAkF;AAClF,wBAAuB,SAAS,CAAC,GAAG,EAAE,QAAQ,EAAE,IAAI,EAAE,MAAM,IAAI,GAAG,aAAa,CAAC;IAAE,IAAI,EAAE,MAAM,CAAC;IAAC,IAAI,EAAE,OAAO,CAAA;CAAE,CAAC,CA8ChH;AAID,wBAAgB,KAAK,CAAC,KAAK,EAAE,UAAU,GAAG,MAAM,CAO/C"}

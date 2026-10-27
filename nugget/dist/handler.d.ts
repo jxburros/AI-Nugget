@@ -1,6 +1,8 @@
 import type { CallInfo, CallRecord, ChatRequest, ChatResult, Connection, EmbedRequest, EmbedResult, GovernancePolicy, KeySource, ModelInfo, ParsedResult, Redactor, StandardSchemaV1, StreamEvent, TelemetrySink, Usage } from './types.js';
 export interface HandlerOptions {
     keySource: KeySource;
+    /** Optional proxy/SDK transport. All engines still run inside this handler. */
+    fetch?: typeof fetch;
     policy?: GovernancePolicy;
     redactor?: Redactor;
     telemetry?: TelemetrySink;

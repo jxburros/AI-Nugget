@@ -42,6 +42,7 @@ const LITERAL_KEY = env.AI_HANDLER_LIVE_KEY;
 const KEY_ENV = env.AI_HANDLER_LIVE_KEY_ENV;
 const RUN_JSON = env.AI_HANDLER_LIVE_JSON === '1';
 const RUN_TOOLS = env.AI_HANDLER_LIVE_TOOLS === '1';
+const RUN_PROBE = env.AI_HANDLER_LIVE_PROBE !== '0';
 const TIMEOUT = 120_000;
 
 function handler(): AIHandler {
@@ -52,6 +53,8 @@ function handler(): AIHandler {
 function connection(): Connection {
   const conn: Connection = { id: 'live', provider: PROVIDER };
   if (BASE_URL) conn.baseUrl = BASE_URL;
+  const protocol = env.AI_HANDLER_LIVE_PROTOCOL;
+  if (protocol === 'responses' || protocol === 'converse' || protocol === 'chat-completions') conn.protocol = protocol;
   if (LITERAL_KEY) conn.keyRef = { kind: 'literal', value: LITERAL_KEY };
   else if (KEY_ENV) conn.keyRef = { kind: 'env', name: KEY_ENV };
   else conn.keyRef = { kind: 'none' };
@@ -63,7 +66,7 @@ function userReq(prompt: string, over: Partial<ChatRequest> = {}): ChatRequest {
 }
 
 describe.runIf(LIVE)(`live smoke: ${PROVIDER}/${MODEL}`, () => {
-  it('reports a healthy connection', async () => {
+  it.runIf(RUN_PROBE)('reports a healthy connection', async () => {
     const result = await handler().testConnection(connection());
     expect(result.ok, result.message).toBe(true);
   }, TIMEOUT);
@@ -129,8 +132,8 @@ describe.runIf(LIVE)(`live smoke: ${PROVIDER}/${MODEL}`, () => {
     for await (const _event of agent) void _event;
     const result = await agent.result;
     // Honest assertion: the loop must terminate cleanly (not error/cancel).
-    expect(['finished', 'max_steps']).toContain(result.stopReason);
-    // If the model used the tool at all, it must have been invoked with validated args.
-    if (calls.length > 0) expect(calls[0]).toMatchObject({ a: expect.any(Number), b: expect.any(Number) });
+    expect(result.stopReason).toBe('finished');
+    expect(calls.length).toBeGreaterThan(0);
+    expect(calls[0]).toMatchObject({ a: 21, b: 21 });
   }, TIMEOUT);
 });

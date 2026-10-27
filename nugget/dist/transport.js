@@ -48,7 +48,8 @@ export async function fetchJson(url, init) {
     const timeout = withTimeout(init.timeoutMs, init.signal ?? undefined);
     const started = Date.now();
     try {
-        const res = await fetch(url, { ...init, signal: timeout.signal });
+        const { fetch: transport = globalThis.fetch, timeoutMs: _timeout, provider: _provider, ...request } = init;
+        const res = await transport(url, { ...request, signal: timeout.signal });
         const raw = await res.text().catch(() => '');
         if (!res.ok)
             throw classify(res.status, raw, init.provider, res.headers);
@@ -73,10 +74,10 @@ export async function fetchJson(url, init) {
  * not merely the connection handshake. Non-2xx responses are classified and
  * thrown before the body is handed back.
  */
-export async function postResponse(url, body, headers, signal, provider) {
+export async function postResponse(url, body, headers, signal, provider, transport = globalThis.fetch) {
     let res;
     try {
-        res = await fetch(url, {
+        res = await transport(url, {
             method: 'POST',
             headers: { 'content-type': 'application/json', ...headers },
             body: JSON.stringify(body),

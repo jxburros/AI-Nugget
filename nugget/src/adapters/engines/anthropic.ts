@@ -53,7 +53,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       yield { type: 'context', kind: 'json_mode_downgraded', data: { provider: conn.provider, reason: 'Claude native JSON outputs require a schema; using a JSON instruction without constrained decoding.' } };
     }
     try {
-      const res = await postResponse(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider, conn.fetch);
       const contentType = res.headers.get('content-type') ?? '';
       if (!contentType.includes('text/event-stream')) {
         const data = await res.json() as unknown;
@@ -181,6 +181,7 @@ export class AnthropicAdapter implements ProviderAdapter {
       headers: conn.headers,
       timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 15_000),
       provider: conn.provider,
+      fetch: conn.fetch,
     });
     const rows = Array.isArray(asRecord(data)?.data) ? asRecord(data)!.data as unknown[] : [];
     return rows

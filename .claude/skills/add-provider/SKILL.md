@@ -10,8 +10,10 @@ hard rule from `AGENTS.md`).
 
 ## Architecture: engines vs profiles
 
-Four **protocol engines** own the wire formats (`src/adapters/engines/`):
-`openaiChat`, `anthropic`, `google`, `ollama`. A data-driven **profile table**
+Six **protocol engines** own the wire formats (`src/adapters/engines/`):
+`openaiChat`, `responses`, `converse`, `anthropic`, `google`, `ollama`.
+Responses and Converse are selected explicitly through `Connection.protocol`;
+see `docs/cloud-providers.md` for endpoint and authentication contracts. A data-driven **profile table**
 (`PROVIDER_PROFILES` in `src/adapters/profiles.ts`) turns each named provider
 into defaults + quirks on top of an engine.
 

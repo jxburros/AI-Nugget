@@ -29,6 +29,7 @@ export async function listOpenModels(conn, profile) {
         headers: conn.headers,
         timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         provider: conn.provider,
+        fetch: conn.fetch,
     });
     const record = asRecord(data);
     const items = Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
@@ -54,6 +55,8 @@ export async function listOpenModels(conn, profile) {
 }
 export async function health(conn, profile) {
     const path = profile.healthPath ?? profile.listModelsPath;
+    if (!path && profile.quirks?.unsupportedProbe)
+        return { ok: false, detail: 'This endpoint has no lightweight health probe; validate with an explicit model call.' };
     if (!path)
         return { ok: true };
     try {
@@ -62,6 +65,7 @@ export async function health(conn, profile) {
             headers: conn.headers,
             timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         return { ok: true };
     }

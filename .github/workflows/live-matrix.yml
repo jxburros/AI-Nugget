@@ -6,7 +6,34 @@ name: Live provider matrix
 # live network calls, cost, and flakiness, while catching live behavior drift
 # the mocked contract suite can't see (see README "Live smoke tests").
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Named profile (empty runs the scheduled matrix)
+        type: string
+        default: ''
+      model:
+        description: Explicit model ID for a manual provider check
+        type: string
+      base_url:
+        description: Full base URL (required for configured cloud endpoints)
+        type: string
+      protocol:
+        type: choice
+        options: [chat-completions, responses, converse]
+        default: chat-completions
+      key_secret:
+        description: Repository secret containing a test API key or access token
+        type: string
+        default: AI_NUGGET_SMOKE_KEY
+      probe:
+        description: Enable lightweight health probe (disable when unavailable)
+        type: boolean
+        default: false
+      tools:
+        description: Exercise a real two-turn native tool round trip
+        type: boolean
+        default: true
   schedule:
     - cron: '17 6 * * 1' # weekly, Monday 06:17 UTC
 
@@ -15,6 +42,7 @@ permissions:
 
 jobs:
   live:
+    if: ${{ github.event_name == 'schedule' || inputs.provider == '' }}
     name: ${{ matrix.provider }}
     runs-on: ubuntu-latest
     strategy:
@@ -22,22 +50,22 @@ jobs:
       matrix:
         include:
           - provider: openai
-            model: gpt-4o-mini
+            model_var: OPENAI_SMOKE_MODEL
             key_env: OPENAI_API_KEY
             json: '1'
             tools: '1'
           - provider: anthropic
-            model: claude-3-5-haiku-20241022
+            model_var: ANTHROPIC_SMOKE_MODEL
             key_env: ANTHROPIC_API_KEY
             json: '1'
             tools: '1'
           - provider: google
-            model: gemini-1.5-flash
+            model_var: GOOGLE_SMOKE_MODEL
             key_env: GOOGLE_API_KEY
             json: '1'
             tools: '1'
           - provider: openrouter
-            model: openai/gpt-4o-mini
+            model_var: OPENROUTER_SMOKE_MODEL
             key_env: OPENROUTER_API_KEY
             json: '0'
             tools: '1'
@@ -53,14 +81,42 @@ jobs:
           PROVIDER_KEY: ${{ secrets[matrix.key_env] }}
           AI_HANDLER_LIVE: '1'
           AI_HANDLER_LIVE_PROVIDER: ${{ matrix.provider }}
-          AI_HANDLER_LIVE_MODEL: ${{ matrix.model }}
+          AI_HANDLER_LIVE_MODEL: ${{ vars[matrix.model_var] }}
           AI_HANDLER_LIVE_JSON: ${{ matrix.json }}
           AI_HANDLER_LIVE_TOOLS: ${{ matrix.tools }}
         run: |
-          if [ -z "$PROVIDER_KEY" ]; then
-            echo "::notice::No ${{ matrix.key_env }} secret configured; skipping ${{ matrix.provider }}."
+          if [ -z "$PROVIDER_KEY" ] || [ -z "$AI_HANDLER_LIVE_MODEL" ]; then
+            echo "::notice::Missing test key or ${{ matrix.model_var }} repository variable; no live verification for ${{ matrix.provider }}."
             exit 0
           fi
           export "${{ matrix.key_env }}=$PROVIDER_KEY"
           export AI_HANDLER_LIVE_KEY_ENV="${{ matrix.key_env }}"
+          npm run test:live
+
+  configured-provider:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.provider != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Explicit provider smoke
+        env:
+          PROVIDER_KEY: ${{ secrets[inputs.key_secret] }}
+          AI_HANDLER_LIVE: '1'
+          AI_HANDLER_LIVE_PROVIDER: ${{ inputs.provider }}
+          AI_HANDLER_LIVE_MODEL: ${{ inputs.model }}
+          AI_HANDLER_LIVE_BASE_URL: ${{ inputs.base_url }}
+          AI_HANDLER_LIVE_PROTOCOL: ${{ inputs.protocol }}
+          AI_HANDLER_LIVE_KEY_ENV: PROVIDER_KEY
+          AI_HANDLER_LIVE_PROBE: ${{ inputs.probe && '1' || '0' }}
+          AI_HANDLER_LIVE_TOOLS: ${{ inputs.tools && '1' || '0' }}
+        run: |
+          if [ -z "$PROVIDER_KEY" ] || [ -z "$AI_HANDLER_LIVE_MODEL" ]; then
+            echo "::error::Manual provider validation requires a configured test credential and model. No live verification performed."
+            exit 1
+          fi
           npm run test:live

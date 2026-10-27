@@ -4,7 +4,7 @@ import { applyAuth } from '../src/adapters/profiles.js';
 
 describe('provider profiles', () => {
   it('ships the documented v1 provider set and no grok/xai profile', () => {
-    const expected = ['openai', 'azure-openai', 'openrouter', 'groq', 'deepseek', 'mistral', 'together', 'fireworks', 'lmstudio', 'llamacpp', 'vllm', 'ollama', 'anthropic', 'google', 'openai-compat'];
+    const expected = ['openai', 'azure-openai', 'openrouter', 'groq', 'deepseek', 'mistral', 'together', 'fireworks', 'lmstudio', 'llamacpp', 'vllm', 'ollama', 'anthropic', 'google', 'openai-compat', 'minimax', 'zai', 'dashscope', 'huggingface', 'deepinfra', 'sambanova', 'nvidia', 'cloudflare', 'bedrock', 'vertex', 'azure-openai-v1'];
     for (const key of expected) expect(PROVIDER_PROFILES[key], key).toBeDefined();
     expect(PROVIDER_PROFILES['grok']).toBeUndefined();
     expect(PROVIDER_PROFILES['xai']).toBeUndefined();

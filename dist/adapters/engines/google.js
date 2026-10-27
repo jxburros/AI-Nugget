@@ -42,7 +42,7 @@ export class GoogleAdapter {
         }
         try {
             const streamUrl = `${conn.baseUrl}/v1beta/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
-            const res = await postResponse(streamUrl, body(req), conn.headers, timeout.signal, conn.provider);
+            const res = await postResponse(streamUrl, body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
             const contentType = res.headers.get('content-type') ?? '';
             const chunks = contentType.includes('text/event-stream') ? sseLines(res) : singleJsonLine(res);
             for await (const line of chunks) {
@@ -116,6 +116,7 @@ export class GoogleAdapter {
                 headers: conn.headers,
                 timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
                 provider: conn.provider,
+                fetch: conn.fetch,
             });
             return { ok: true };
         }
@@ -134,6 +135,7 @@ export class GoogleAdapter {
             headers: conn.headers,
             timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 15_000),
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const rows = Array.isArray(asRecord(data)?.models) ? asRecord(data).models : [];
         const models = [];

@@ -1,5 +1,19 @@
 # Upgrading
 
+## 0.7.4 → 0.7.5
+
+Existing connections keep their protocol and URLs. New profiles, `Connection.cloud`,
+`Connection.protocol`, `Connection.auth`, `KeySource` request signing and
+`HandlerOptions.fetch` are additive. See [cloud providers](docs/cloud-providers.md).
+Copy `providerState` onto assistant messages in custom tool loops; `runAgent`
+already does so. New profiles without a lightweight probe report that limitation
+in `testConnection`; validate with an explicit model call.
+
+Responses and Converse reject truncated terminal responses and malformed tool
+arguments. New live-smoke tool checks require actual tool execution and a clean
+finish; an unused tool or exhausted step budget no longer counts as a pass.
+
+
 ## 0.7.3 → 0.7.4
 
 No changes: 0.7.4 republishes the 0.7.3 package contents after a release-pipeline fix.

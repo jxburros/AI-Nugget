@@ -1,6 +1,17 @@
 const HOSTED_CLOUD = { nativeTools: true, jsonMode: true, local: false, embeddable: false };
 const LOCAL_RUNTIME = { nativeTools: false, jsonMode: false, local: true, embeddable: true };
 export const PROVIDER_PROFILES = {
+    minimax: { engine: 'openaiChat', defaultBaseUrl: 'https://api.minimax.io/v1', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false, unsupportedProbe: true } },
+    zai: { engine: 'openaiChat', defaultBaseUrl: 'https://api.z.ai/api/paas/v4', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false, unsupportedProbe: true } },
+    dashscope: { engine: 'openaiChat', defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, unsupportedProbe: true } },
+    huggingface: { engine: 'openaiChat', defaultBaseUrl: 'https://router.huggingface.co/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false } },
+    deepinfra: { engine: 'openaiChat', defaultBaseUrl: 'https://api.deepinfra.com/v1/openai', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: true } },
+    sambanova: { engine: 'openaiChat', defaultBaseUrl: 'https://api.sambanova.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false } },
+    nvidia: { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: { ...LOCAL_RUNTIME, embeddable: false }, quirks: { keyOptional: true, preserveAssistantState: true } },
+    cloudflare: { engine: 'openaiChat', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { responsesStreaming: false, embeddings: true, preserveAssistantState: true, unsupportedProbe: true } },
+    bedrock: { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false } },
+    vertex: { engine: 'openaiChat', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { embeddings: false, unsupportedProbe: true } },
+    'azure-openai-v1': { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: true } },
     openai: {
         engine: 'openaiChat',
         defaultBaseUrl: 'https://api.openai.com/v1',
@@ -99,6 +110,10 @@ export const PROVIDER_PROFILES = {
     },
 };
 export function profileFor(provider, baseUrl) {
+    if (provider === 'bedrock' && baseUrl && new URL(baseUrl).hostname.startsWith('bedrock-runtime.')) {
+        const profile = PROVIDER_PROFILES.bedrock;
+        return { ...profile, listModelsPath: undefined, quirks: { ...profile.quirks, unsupportedProbe: true } };
+    }
     return PROVIDER_PROFILES[provider] ?? {
         ...PROVIDER_PROFILES['openai-compat'],
         defaultBaseUrl: baseUrl,

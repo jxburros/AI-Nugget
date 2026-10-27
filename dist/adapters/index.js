@@ -2,9 +2,15 @@ import { AnthropicAdapter } from './engines/anthropic.js';
 import { GoogleAdapter } from './engines/google.js';
 import { OllamaAdapter } from './engines/ollama.js';
 import { OpenAIChatAdapter } from './engines/openaiChat.js';
+import { ResponsesAdapter } from './engines/responses.js';
+import { ConverseAdapter } from './engines/converse.js';
 import { profileFor } from './profiles.js';
-export function adapterFor(provider, baseUrl) {
+export function adapterFor(provider, baseUrl, protocol) {
     const profile = profileFor(provider, baseUrl);
+    if (protocol === 'converse')
+        return new ConverseAdapter(provider);
+    if (protocol === 'responses')
+        return new ResponsesAdapter(provider, profile);
     if (profile.engine === 'anthropic')
         return new AnthropicAdapter(provider);
     if (profile.engine === 'google')
