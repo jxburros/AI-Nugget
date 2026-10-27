@@ -47,7 +47,7 @@ export function withTimeout(ms: number, external?: AbortSignal, idleMs?: number)
   };
 }
 
-export async function fetchJson(url: string, init: RequestInit & { timeoutMs: number; provider?: string }): Promise<{
+export async function fetchJson(url: string, init: RequestInit & { timeoutMs: number; provider?: string; fetch?: typeof fetch }): Promise<{
   data: unknown;
   status: number;
   totalMs: number;
@@ -55,7 +55,8 @@ export async function fetchJson(url: string, init: RequestInit & { timeoutMs: nu
   const timeout = withTimeout(init.timeoutMs, init.signal ?? undefined);
   const started = Date.now();
   try {
-    const res = await fetch(url, { ...init, signal: timeout.signal });
+    const { fetch: transport = globalThis.fetch, timeoutMs: _timeout, provider: _provider, ...request } = init;
+    const res = await transport(url, { ...request, signal: timeout.signal });
     const raw = await res.text().catch(() => '');
     if (!res.ok) throw classify(res.status, raw, init.provider, res.headers);
     return { data: raw.trim() ? tolerantJson(raw) : null, status: res.status, totalMs: Date.now() - started };
@@ -83,10 +84,11 @@ export async function postResponse(
   headers: Record<string, string>,
   signal: AbortSignal,
   provider: string,
+  transport: typeof fetch = globalThis.fetch,
 ): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await transport(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...headers },
       body: JSON.stringify(body),

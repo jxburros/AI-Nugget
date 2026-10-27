@@ -4,6 +4,13 @@ AI Nugget is a zero-runtime-dependency TypeScript library. Its public contract
 must work in supported Node versions and in a real browser; it has no
 standalone product UI, local storage, or IndexedDB flow to test.
 
+## Executable profile
+
+`.ai/qa.yaml` defines levels 1–13 explicitly for QAI-ality. No inferred
+project-type fallback or product UI is required. Install Chromium before level 4.
+The profile never enables paid live tests. Node 22, npm and git are prerequisites;
+run installation/build levels before checks that consume their output.
+
 ## Required checks
 
 For every change, install from the lockfile and run:

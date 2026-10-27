@@ -35,7 +35,7 @@ through one governed pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-19 provider profiles over 4 protocol engines. It runs identically in Node, a
+30 provider profiles over 6 protocol engines. It runs identically in Node, a
 browser main thread, and a Web Worker using only `fetch`, `ReadableStream`,
 `AbortController`, and `TextDecoder` — an invariant now proven three ways
 (headless-Chromium contract suite, a workerd bundle in CI, and no Node imports
@@ -46,7 +46,7 @@ or secrets vault.
 
 ## Architecture health
 
-**The engine/profile split is doing its job.** Four engines own wire formats;
+**The engine/profile split is doing its job.** Six engines own wire formats;
 a data-driven table turns each provider into defaults + quirks. Adding an
 OpenAI-compatible provider is a table row. Three of this cycle's changes
 (idempotency support, JSON-mode downgrade signaling, stream-anomaly parity)

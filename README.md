@@ -2,7 +2,7 @@
 
 <img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
 
-**Version 0.7.4** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.7.5** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -11,12 +11,20 @@ providers through one pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-19 provider profiles over 4 protocol engines. Runs identically in Node, the
+30 provider profiles over 6 protocol engines. Runs identically in Node, the
 browser main thread, and Web Workers using only `fetch`, `ReadableStream`,
 `AbortController`, and `TextDecoder`. MIT licensed.
 
 It is intentionally **not** a router, prompt library, memory system, or secrets
 vault: apps choose models, own prompts, store secrets, and decide policy.
+
+## Provider and cloud expansion
+
+Version 0.7.5 adds eight hosted/runtime profiles, Bedrock, Vertex and Azure v1;
+explicit Responses and Converse protocols; and optional cloud request signing.
+See [cloud setup and verification limits](docs/cloud-providers.md),
+[consumer rollout](docs/consumer-rollout.md), and the proposed
+[optional operations plan](docs/plans/optional-operations.md).
 
 ## Quick start
 

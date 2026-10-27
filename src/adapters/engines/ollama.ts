@@ -36,7 +36,7 @@ export class OllamaAdapter implements ProviderAdapter {
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
     try {
-      const res = await postResponse(joinUrl(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider);
+      const res = await postResponse(joinUrl(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
       for await (const value of ndjsonLines(res)) {
         timeout.bump();
         const record = asRecord(value);
@@ -94,6 +94,7 @@ export class OllamaAdapter implements ProviderAdapter {
       headers: conn.headers,
       timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       provider: conn.provider,
+      fetch: conn.fetch,
     });
     const models = Array.isArray(asRecord(data)?.models) ? asRecord(data)!.models as unknown[] : [];
     const ids = models.map((model) => asString(asRecord(model)?.name) ?? asString(asRecord(model)?.model) ?? '').filter(Boolean);
@@ -117,6 +118,7 @@ export class OllamaAdapter implements ProviderAdapter {
       body: JSON.stringify(applyProviderOptions({ model: req.model, input: inputs }, req.providerOptions)),
       timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       provider: conn.provider,
+      fetch: conn.fetch,
     });
     const record = asRecord(data);
     const rows = Array.isArray(record?.embeddings) ? record.embeddings : [];
@@ -138,6 +140,7 @@ export class OllamaAdapter implements ProviderAdapter {
       body: JSON.stringify({ model }),
       timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 15_000),
       provider: conn.provider,
+      fetch: conn.fetch,
     });
     const record = asRecord(data);
     const modelInfo = asRecord(record?.model_info);

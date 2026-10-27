@@ -1,6 +1,6 @@
 # Providers
 
-Four **protocol engines** own the wire formats; a data-driven **profile table**
+Six **protocol engines** own the wire formats; a data-driven **profile table**
 (`src/adapters/profiles.ts`) turns each named provider into defaults + quirks on
 top of an engine, so adding an OpenAI-compatible provider is a table row, not
 another copy of the SSE loop. `adapterFor(provider)` lives once, in
@@ -18,6 +18,14 @@ autocomplete the names above and a typo is a compile error — while an arbitrar
 string still resolves through the `openai-compat` escape hatch for endpoints
 that have no profile.
 
+New hosted/cloud profiles and their exact endpoints, protocol restrictions and
+authentication examples are listed in [Cloud providers](cloud-providers.md).
+
+| Additional engine | Selection | Behavior |
+|---|---|---|
+| `responses` | `Connection.protocol: responses` | SSE or buffered Responses; complete output-item replay |
+| `converse` | `Connection.protocol: converse` | Bedrock EventStream or buffered Converse; native tools and signatures |
+
 ## Verification status
 
 **A profile in the table is not a promise that the provider is live-verified.**
@@ -27,10 +35,16 @@ column before betting a production integration on a profile.
 
 | Tier | What it means | Providers |
 |---|---|---|
-| **live-verified** | Covered by `tests/live-smoke.test.ts` against the real endpoint in the scheduled live matrix (`.github/workflows/live-matrix.yml`), gated on a repo secret being present | `openai`, `anthropic`, `google`, `openrouter` |
-| **live-verified (manual)** | Live-smoke-able locally with a running server, but not in CI (needs a reachable local daemon) | `ollama`, `llamacpp`, `lmstudio`, `vllm` |
+| **live-matrix configured** | Configured for `tests/live-smoke.test.ts` against the real endpoint in the scheduled live matrix (`.github/workflows/live-matrix.yml`), gated on a repo secret and explicit `*_SMOKE_MODEL` repository variable | `openai`, `anthropic`, `google`, `openrouter` |
+| **manual smoke available** | Live-smoke-able locally with a running server, but not in CI (needs a reachable local daemon) | `ollama`, `llamacpp`, `lmstudio`, `vllm` |
 | **mock-verified** | Engine behavior covered by the mocked contract suite; the profile's base URL, auth mode, and quirks are believed correct but not continuously checked against the live API | `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `cohere`, `perplexity` |
 | **configuration-only** | No fixed endpoint to verify — behavior depends entirely on what you point it at | `azure-openai` (deployment-specific URL template), `openai-compat` |
+
+The new `minimax`, `zai`, `dashscope`, `huggingface`, `deepinfra`, `sambanova`,
+`nvidia`, `cloudflare`, `bedrock`, `vertex` and `azure-openai-v1` profiles are
+**mock-verified** by handler-level URL/auth/protocol tests in Node and Chromium.
+Their live behavior was not exercised during this release. A configured workflow
+or an available smoke command alone is not evidence of a successful live run.
 
 If a mock-verified provider drifts (a renamed base path, a new required header),
 the mocked suite will still pass. Report it as a bug with the provider name and
@@ -144,14 +158,17 @@ models — and it only fires when the request carried tools and the effective
 effort was not already `'none'`. Set `reasoningEffort: 'none'` yourself on
 tool-using turns to skip the extra round trip.
 
-The `/v1/responses` API keeps reasoning *and* tools; a `responses` engine is the
-planned long-term path and is not in this release.
+For compatible endpoints, explicitly select `protocol: 'responses'` to preserve
+Responses reasoning items and native function calls; see [cloud providers](cloud-providers.md).
 
 ## Stream anomalies
 
-All four engines emit `{ type: 'context', kind: 'stream_anomaly' }` when a
+The four original engines emit `{ type: 'context', kind: 'stream_anomaly' }` when a
 stream ends without the provider's terminal marker (OpenAI `finish_reason`,
 Anthropic `stop_reason`/`message_stop`, Google `finishReason`, Ollama `done`).
+The new Responses and Converse engines instead fail with `invalid_response` if
+the terminal response/stop reason is missing.
+
 That is the signal for a truncated or dropped connection — the result is still
 delivered, but it may be incomplete.
 

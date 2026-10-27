@@ -65,15 +65,16 @@ export function mockFetch(...responses: Array<Response | ((call: FetchCall) => R
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : (input as Request).url;
     let body: unknown;
-    if (typeof init.body === 'string') {
-      try { body = JSON.parse(init.body); } catch { body = init.body; }
+    const rawBody = typeof init.body === 'string' ? init.body : input instanceof Request ? await input.clone().text() : undefined;
+    if (rawBody) {
+      try { body = JSON.parse(rawBody); } catch { body = rawBody; }
     }
     const call: FetchCall = {
       url,
-      method: (init.method ?? 'GET').toUpperCase(),
-      headers: normalizeHeaders(init.headers),
+      method: (init.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase(),
+      headers: normalizeHeaders(init.headers ?? (input instanceof Request ? input.headers : undefined)),
       body,
-      signal: init.signal ?? undefined,
+      signal: init.signal ?? (input instanceof Request ? input.signal : undefined),
     };
     calls.push(call);
     if (index >= responses.length) throw new Error(`Unexpected fetch #${index + 1} to ${url}`);

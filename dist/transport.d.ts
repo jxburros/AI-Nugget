@@ -8,6 +8,7 @@ export declare function withTimeout(ms: number, external?: AbortSignal, idleMs?:
 export declare function fetchJson(url: string, init: RequestInit & {
     timeoutMs: number;
     provider?: string;
+    fetch?: typeof fetch;
 }): Promise<{
     data: unknown;
     status: number;
@@ -23,7 +24,7 @@ export declare function fetchJson(url: string, init: RequestInit & {
  * not merely the connection handshake. Non-2xx responses are classified and
  * thrown before the body is handed back.
  */
-export declare function postResponse(url: string, body: unknown, headers: Record<string, string>, signal: AbortSignal, provider: string): Promise<Response>;
+export declare function postResponse(url: string, body: unknown, headers: Record<string, string>, signal: AbortSignal, provider: string, transport?: typeof fetch): Promise<Response>;
 export declare function sseLines(res: Response): AsyncIterable<string>;
 export declare function ndjsonLines(res: Response): AsyncIterable<unknown>;
 export declare function textLines(res: Response): AsyncIterable<string>;

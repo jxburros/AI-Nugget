@@ -33,6 +33,7 @@ export async function listOpenModels(conn: ResolvedConnection, profile: Provider
     headers: conn.headers,
     timeoutMs: conn.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     provider: conn.provider,
+      fetch: conn.fetch,
   });
   const record = asRecord(data);
   const items = Array.isArray(record?.data) ? record.data : Array.isArray(record?.models) ? record.models : [];
@@ -56,6 +57,7 @@ export async function listOpenModels(conn: ResolvedConnection, profile: Provider
 
 export async function health(conn: ResolvedConnection, profile: ProviderProfile): Promise<{ ok: boolean; detail?: string }> {
   const path = profile.healthPath ?? profile.listModelsPath;
+  if (!path && profile.quirks?.unsupportedProbe) return { ok: false, detail: 'This endpoint has no lightweight health probe; validate with an explicit model call.' };
   if (!path) return { ok: true };
   try {
     await fetchJson(joinUrl(conn.baseUrl, path), {
@@ -63,6 +65,7 @@ export async function health(conn: ResolvedConnection, profile: ProviderProfile)
       headers: conn.headers,
       timeoutMs: Math.min(conn.timeoutMs ?? DEFAULT_TIMEOUT_MS, 10_000),
       provider: conn.provider,
+      fetch: conn.fetch,
     });
     return { ok: true };
   } catch (error) {

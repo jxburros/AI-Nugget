@@ -35,12 +35,14 @@ class OpenAIChatAdapter {
         let outputTokens;
         let finish;
         let sawTerminal = false;
+        let reasoningText = '';
+        let assistantState;
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
             let res;
             try {
-                res = await (0, transport_js_1.postResponse)(urlFor(conn, this.profile, req), openAiBody(req, this.profile), conn.headers, timeout.signal, conn.provider);
+                res = await (0, transport_js_1.postResponse)(urlFor(conn, this.profile, req), openAiBody(req, this.profile, conn.provider), conn.headers, timeout.signal, conn.provider, conn.fetch);
             }
             catch (error) {
                 // OpenAI's `/chat/completions` refuses function tools on a reasoning model
@@ -64,7 +66,7 @@ class OpenAIChatAdapter {
                     },
                 };
                 const retryReq = { ...req, providerOptions: { ...req.providerOptions, reasoning_effort: 'none' } };
-                res = await (0, transport_js_1.postResponse)(urlFor(conn, this.profile, retryReq), openAiBody(retryReq, this.profile), conn.headers, timeout.signal, conn.provider);
+                res = await (0, transport_js_1.postResponse)(urlFor(conn, this.profile, retryReq), openAiBody(retryReq, this.profile, conn.provider), conn.headers, timeout.signal, conn.provider, conn.fetch);
             }
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
@@ -72,6 +74,8 @@ class OpenAIChatAdapter {
                 const rawText = await res.text().catch(() => '');
                 const raw = (0, base_js_1.safeParse)(rawText) ?? { text: rawText };
                 const parsed = parseOpenAiResponse(raw);
+                const choices = (0, util_js_1.asRecord)(raw)?.choices;
+                assistantState = (0, util_js_1.asRecord)((0, util_js_1.asRecord)(Array.isArray(choices) ? choices[0] : undefined)?.message);
                 text = parsed.text;
                 toolCalls = parsed.toolCalls;
                 inputTokens = parsed.inputTokens;
@@ -106,6 +110,8 @@ class OpenAIChatAdapter {
                     // ride their own channel so they don't contaminate the answer text.
                     const reasoning = (0, util_js_1.asString)(delta?.reasoning_content) ?? (0, util_js_1.asString)(delta?.reasoning);
                     if (reasoning)
+                        reasoningText += reasoning;
+                    if (reasoning)
                         yield { type: 'reasoning', text: reasoning };
                     const piece = (0, util_js_1.asString)(delta?.content);
                     if (piece) {
@@ -138,6 +144,13 @@ class OpenAIChatAdapter {
             if (!sawTerminal)
                 yield (0, base_js_1.streamAnomaly)('stream ended without a finish_reason');
             const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
+            if (this.profile.quirks?.preserveAssistantState) {
+                result.providerState = { provider: conn.provider, model: req.model, protocol: 'chat-completions', content: [assistantState ?? {
+                            role: 'assistant', content: text,
+                            ...(reasoningText ? { reasoning_content: reasoningText } : {}),
+                            ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })) } : {}),
+                        }] };
+            }
             yield { type: 'done', result };
         }
         catch (error) {
@@ -154,13 +167,17 @@ class OpenAIChatAdapter {
         return (0, base_js_1.health)(conn, this.profile);
     }
     async embed(conn, req) {
+        if (this.profile.quirks?.embeddings === false)
+            throw new errors_js_1.AIError(`${conn.provider} does not expose OpenAI-compatible embeddings on this endpoint`, { kind: 'invalid_request', retryable: false, provider: conn.provider });
         const inputs = Array.isArray(req.input) ? req.input : [req.input];
         const { data } = await (0, transport_js_1.fetchJson)((0, util_js_1.joinUrl)(conn.baseUrl, '/embeddings'), {
             method: 'POST',
             headers: { 'content-type': 'application/json', ...conn.headers },
             body: JSON.stringify((0, util_js_1.applyProviderOptions)({ model: req.model, input: inputs }, req.providerOptions)),
+            signal: req.signal,
             timeoutMs: conn.timeoutMs ?? base_js_1.DEFAULT_TIMEOUT_MS,
             provider: conn.provider,
+            fetch: conn.fetch,
         });
         const record = (0, util_js_1.asRecord)(data);
         const rows = Array.isArray(record?.data) ? record.data : [];
@@ -183,10 +200,14 @@ exports.OpenAIChatAdapter = OpenAIChatAdapter;
 function asEmbedding(value) {
     return Array.isArray(value) ? value.filter((n) => typeof n === 'number') : [];
 }
-function openAiBody(req, profile) {
+function openAiBody(req, profile, provider) {
     const body = {
         model: req.model,
-        messages: req.messages.map(toOpenAiMessage),
+        messages: req.messages.map(message => {
+            const state = message.providerState;
+            return profile.quirks?.preserveAssistantState && message.role === 'assistant' && state?.provider === provider && state.model === req.model && state.protocol === 'chat-completions'
+                ? state.content[0] ?? toOpenAiMessage(message) : toOpenAiMessage(message);
+        }),
         temperature: req.temperature,
         top_p: req.topP,
         stop: req.stopSequences,

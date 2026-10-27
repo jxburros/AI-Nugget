@@ -4,6 +4,7 @@ exports.AIHandler = void 0;
 exports.resetPolicyWarningForTests = resetPolicyWarningForTests;
 const index_js_1 = require("./adapters/index.js");
 const profiles_js_1 = require("./adapters/profiles.js");
+const cloud_js_1 = require("./adapters/cloud.js");
 const errors_js_1 = require("./errors.js");
 const json_js_1 = require("./json.js");
 const reasoning_js_1 = require("./reasoning.js");
@@ -55,7 +56,6 @@ class AIHandler {
     async *stream(conn, req) {
         const callId = createCallId();
         const startedAt = Date.now();
-        const adapter = (0, index_js_1.adapterFor)(conn.provider, conn.baseUrl);
         const preflight = await this.preflight(callId, conn, req.model, req.metadata);
         if (!preflight.ok)
             return yield* this.failStream(callId, conn, req, startedAt, 1, preflight.error);
@@ -63,6 +63,7 @@ class AIHandler {
         // so a provider that supports it collapses a re-sent generation instead of
         // billing it twice (see `supportsIdempotencyKey` in the profile table).
         const resolved = withIdempotencyKey(preflight.resolved, callId);
+        const adapter = (0, index_js_1.adapterFor)(conn.provider, resolved.baseUrl, conn.protocol);
         let acquired = false;
         let recorded = false;
         let attempt = 0;
@@ -199,14 +200,14 @@ class AIHandler {
     }
     async listModels(conn) {
         return this.runProbe(conn, '__listModels__', async (resolved) => {
-            const adapter = (0, index_js_1.adapterFor)(conn.provider, conn.baseUrl);
+            const adapter = (0, index_js_1.adapterFor)(conn.provider, resolved.baseUrl, conn.protocol);
             return adapter.listModels?.(resolved) ?? [];
         });
     }
     async testConnection(conn) {
         try {
             return await this.runProbe(conn, '__testConnection__', async (resolved) => {
-                const adapter = (0, index_js_1.adapterFor)(conn.provider, conn.baseUrl);
+                const adapter = (0, index_js_1.adapterFor)(conn.provider, resolved.baseUrl, conn.protocol);
                 const health = await adapter.health?.(resolved);
                 if (health) {
                     if (!health.ok)
@@ -281,7 +282,7 @@ class AIHandler {
         if (!preflight.ok)
             return fail(preflight.error);
         const resolved = preflight.resolved;
-        const adapter = (0, index_js_1.adapterFor)(conn.provider, conn.baseUrl);
+        const adapter = (0, index_js_1.adapterFor)(conn.provider, resolved.baseUrl, conn.protocol);
         if (!adapter.embed) {
             return fail(new errors_js_1.AIError(`Provider ${conn.provider} does not support embeddings`, { kind: 'invalid_request', retryable: false, provider: conn.provider }));
         }
@@ -351,7 +352,7 @@ class AIHandler {
     }
     async resolveConnection(conn) {
         const profile = (0, profiles_js_1.profileFor)(conn.provider, conn.baseUrl);
-        const baseUrl = conn.baseUrl ?? profile.defaultBaseUrl;
+        const baseUrl = (0, cloud_js_1.connectionBaseUrl)(conn);
         if (!baseUrl)
             throw new errors_js_1.AIError(`Provider ${conn.provider} requires baseUrl`, { kind: 'invalid_request', retryable: false, provider: conn.provider });
         const keyRef = conn.keyRef ?? { kind: 'none' };
@@ -360,11 +361,36 @@ class AIHandler {
             throw new errors_js_1.AIError(`API key unavailable: ${key.reason}`, { kind: 'key_unavailable', retryable: false, provider: conn.provider });
         }
         this.sessionRedactor.addSecret(key.apiKey);
+        const transport = this.opts.fetch ?? globalThis.fetch;
+        const authorize = key.authorize;
+        const signedFetch = authorize ? async (input, init) => {
+            const request = new Request(input, init);
+            // Keep the engine-owned signal directly; Request creates a follower signal.
+            const signal = init?.signal ?? request.signal;
+            let signed;
+            try {
+                signed = await abortableAuthorization(authorize(request), signal);
+            }
+            catch {
+                if (signal.aborted)
+                    throw new errors_js_1.AIError('Request authorization canceled', { kind: 'canceled', retryable: false, provider: conn.provider });
+                // Signer errors can contain SDK credential objects; never forward them.
+                throw new errors_js_1.AIError('Request authorization failed', { kind: 'auth', retryable: false, provider: conn.provider });
+            }
+            if (signed.url !== request.url || signed.method !== request.method) {
+                throw new errors_js_1.AIError('Request authorizer changed the endpoint or method', { kind: 'invalid_request', retryable: false, provider: conn.provider });
+            }
+            for (const name of ['authorization', 'x-amz-security-token', 'x-api-key', 'api-key']) {
+                this.sessionRedactor.addSecret(signed.headers.get(name));
+            }
+            return transport(signed, { signal });
+        } : this.opts.fetch;
         return {
             ...conn,
             baseUrl: trimSlash(baseUrl),
             apiKey: key.apiKey,
-            headers: (0, profiles_js_1.applyAuth)(profile, key.apiKey, conn.headers ?? {}),
+            headers: (0, profiles_js_1.applyAuth)(conn.auth ? { ...profile, auth: conn.auth } : profile, key.apiKey, conn.headers ?? {}),
+            fetch: signedFetch,
         };
     }
     async acquire(signal) {
@@ -529,7 +555,7 @@ function trimSlash(value) {
  * key, and hooks routinely log the whole object.
  */
 function safeResolved(resolved) {
-    const { apiKey: _apiKey, headers, ...rest } = resolved;
+    const { apiKey: _apiKey, fetch: _fetch, headers, ...rest } = resolved;
     return { ...rest, ...safeKeyRef(resolved), headers: maskAuthHeaders(headers) };
 }
 /**
@@ -583,4 +609,21 @@ async function validateWithSchema(schema, text) {
 }
 function createCallId() {
     return globalThis.crypto?.randomUUID?.() ?? `call_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+}
+/** A stalled SDK signer must not outlive the engine's timeout/cancellation. */
+async function abortableAuthorization(pending, signal) {
+    let abort;
+    try {
+        return await Promise.race([pending, new Promise((_resolve, reject) => {
+                abort = () => reject(signal.reason);
+                if (signal.aborted)
+                    abort();
+                else
+                    signal.addEventListener('abort', abort, { once: true });
+            })]);
+    }
+    finally {
+        if (abort)
+            signal.removeEventListener('abort', abort);
+    }
 }
