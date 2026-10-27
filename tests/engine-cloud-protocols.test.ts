@@ -104,6 +104,21 @@ describe('Bedrock Converse through the handler', () => {
     expect(result.usage).toEqual({ inputTokens: 2, outputTokens: 3, estimated: false });
   });
 
+  it('reassembles independently encoded redacted reasoning chunks for replay', async () => {
+    const { calls } = mockFetch(awsResponse([
+      ['contentBlockDelta', { contentBlockIndex: 0, delta: { reasoningContent: { redactedContent: 'AA==' } } }],
+      ['contentBlockDelta', { contentBlockIndex: 0, delta: { reasoningContent: { redactedContent: '/w==' } } }],
+      ['messageStop', { stopReason: 'end_turn' }],
+    ]), jsonResponse({ output: { message: { content: [{ text: 'done' }] } }, stopReason: 'end_turn' }));
+    const handler = h(); const conn = c('bedrock', 'converse');
+    const first = await handler.chat(conn, chatReq());
+    expect(first.providerState?.content).toEqual([{ reasoningContent: { redactedContent: 'AP8=' } }]);
+    await handler.chat(conn, chatReq({ providerOptions: { stream: false }, messages: [
+      { role: 'assistant', content: '', providerState: first.providerState }, { role: 'user', content: 'continue' },
+    ] }));
+    expect(calls[1]?.body).toMatchObject({ messages: [{ role: 'assistant', content: first.providerState?.content }, { role: 'user' }] });
+  });
+
   it('round-trips native tool calls and groups parallel tool results', async () => {
     const { calls } = mockFetch(awsResponse([
       ['contentBlockStart', { contentBlockIndex: 0, start: { toolUse: { toolUseId: 'tool1', name: 'lookup' } } }],

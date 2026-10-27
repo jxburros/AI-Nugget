@@ -29,6 +29,7 @@ class ConverseAdapter {
         let usage;
         const blocks = new Map();
         const argumentsByIndex = new Map();
+        const redactedByIndex = new Map();
         const buffered = req.providerOptions?.stream === false;
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
         try {
@@ -78,8 +79,16 @@ class ConverseAdapter {
                             }
                             if (reasoning.signature)
                                 reasoningText.signature = ((0, util_js_1.asString)(reasoningText.signature) ?? '') + (0, util_js_1.asString)(reasoning.signature);
-                            if (reasoning.redactedContent)
-                                content.redactedContent = ((0, util_js_1.asString)(content.redactedContent) ?? '') + (0, util_js_1.asString)(reasoning.redactedContent);
+                            if (typeof reasoning.redactedContent === 'string') {
+                                const chunks = redactedByIndex.get(index) ?? [];
+                                try {
+                                    chunks.push(atob(reasoning.redactedContent));
+                                }
+                                catch {
+                                    throw invalid('Malformed Converse redacted reasoning');
+                                }
+                                redactedByIndex.set(index, chunks);
+                            }
                             if (Object.keys(reasoningText).length)
                                 content.reasoningText = reasoningText;
                             current.reasoningContent = content;
@@ -94,6 +103,12 @@ class ConverseAdapter {
             }
             if (!stop)
                 throw invalid('Converse stream ended without a stop reason');
+            // Each event encodes its own binary chunk; joining base64 strings would
+            // leave padding in the middle and corrupt the next-turn replay payload.
+            for (const [index, chunks] of redactedByIndex) {
+                const block = blocks.get(index);
+                block.reasoningContent = { ...(0, util_js_1.asRecord)(block.reasoningContent), redactedContent: btoa(chunks.join('')) };
+            }
             const toolCalls = [];
             for (const [index, block] of blocks) {
                 const tool = (0, util_js_1.asRecord)(block.toolUse);
