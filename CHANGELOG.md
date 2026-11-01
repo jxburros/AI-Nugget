@@ -3,6 +3,28 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-11-01 - Claude — 0.7.6
+
+Release-pipeline change only; no source or package-content change from 0.7.5.
+
+### Changed
+- `.github/workflows/publish.yml`: the npm publish step no longer sets
+  `NODE_AUTH_TOKEN` from `NPM_TOKEN`; it authenticates through npm trusted
+  publishing (OIDC) using the job's existing `id-token: write` permission.
+  The `NPM_TOKEN` granular token expires on 2026-11-08.
+- Version advanced to 0.7.6 in `release.json`, `package.json`,
+  `package-lock.json` and `nugget/VERSION.txt`, with release notes.
+
+### Not completed
+- The npmjs.com trusted publisher entry for `@jxburros/ai-nugget` must be added
+  by the maintainer before the next Release run; it was not changed here.
+
+### Notes
+- Validation: `npm test` (286 passed, 6 skipped), `npm run lint`, `npm run build`
+  and `npm run build:nugget` (no drift beyond the version line). The Release
+  workflow itself was not run; the first OIDC publish happens on the next
+  Release dispatch.
+
 ## 2026-10-27 - Codex — 0.7.5
 
 ### Changed
