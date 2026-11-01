@@ -99,8 +99,9 @@ jobs:
         path: package-output
     - name: Publish the prebuilt package (or dry run)
       shell: bash
+      # No NODE_AUTH_TOKEN: npm trusted publishing (OIDC) signs this job in
+      # through id-token: write above, so no npm access token is needed.
       env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         PACKAGE_NAME: '@jxburros/ai-nugget'
         PACKAGE_VERSION: ${{ fromJSON(needs.plan.outputs.apps)['ai-nugget'].version }}
         REGISTRY: https://registry.npmjs.org
