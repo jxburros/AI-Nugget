@@ -3,6 +3,38 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
+## 2026-11-10 - Claude
+
+### Changed
+- Added `meta` (Meta Model API: Muse Spark/Wonder, `https://api.meta.ai/v1`) and
+  `vercel` (Vercel AI Gateway) profiles.
+- Refreshed profiles against official docs: `moonshot` (max_completion_tokens,
+  json_schema, stream usage, `reasoning_content` replay), `deepseek`/`fireworks`/
+  `together` (reasoning replay; Together host `api.together.ai`), `groq` and
+  `minimax` (`max_completion_tokens`, MiniMax stream usage). Documented the
+  Perplexity Sonar Chat Completions end-of-support and its replacements.
+- `ContentPart` adds `audio`, `video` and `file` parts, `dataBase64`, `url` and
+  `filename`, mapped per engine; unsupported parts fail as `invalid_request`
+  instead of being dropped.
+- `ChatResult.media` and `context`/`media` stream events surface in-band
+  generated images/audio (Gemini, OpenRouter-style images, chat audio,
+  Responses image generation).
+- `ReasoningEffort` adds `xhigh` and `max`. Gemini 3+ maps effort to
+  `thinkingLevel`; Google results carry `providerState` so thought signatures
+  are replayed, with Google's skip sentinel for stateless Gemini 3 history.
+- Reasoning replay echoes the field it arrived in (`reasoning` or `reasoning_content`).
+
+### Not completed
+- Live provider calls: no credentials available; all new and changed profiles
+  are mock-verified only.
+- Perplexity's default base URL is unchanged pending a maintainer decision.
+- OpenRouter/Vercel `reasoning_details` replay is not implemented.
+- No version bump; `release.json` is unchanged.
+
+### Notes
+- Validation: `npm test` (304 passed), `npm run test:browser` (304 passed),
+  `npm run lint`, `npm run build`, `npm run build:nugget`.
+
 ## 2026-10-27 - Codex — 0.7.5
 
 ### Changed

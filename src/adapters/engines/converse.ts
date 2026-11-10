@@ -1,8 +1,8 @@
 import { AIError } from '../../errors.js';
 import { postResponse } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import type { ChatMessage, ChatRequest, ContentPart, ChatResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl } from '../../util.js';
-import { safeParse, streamError, streamTimeout } from './base.js';
+import { partBase64, partHasBytes, partMime, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
 import { awsEvents } from './awsEventStream.js';
 
 /** Bedrock native Converse/ConverseStream, distinct from its compatible APIs. */
@@ -145,7 +145,38 @@ function converseBody(conn: ResolvedConnection, req: ChatRequest): Record<string
 
 function parts(message: ChatMessage): Record<string, unknown>[] {
   if (typeof message.content === 'string') return message.content ? [{ text: message.content }] : [];
-  return message.content.map(part => part.type === 'image'
-    ? { image: { format: (part.mimeType ?? 'image/png').split('/')[1], source: { bytes: part.imageBase64 } } }
-    : { text: part.text ?? '' });
+  return message.content.map(conversePart);
+}
+
+/**
+ * Converse image/document/video blocks carry raw bytes (base64 in JSON) or,
+ * for video, an `s3://` location. Converse has no audio block.
+ */
+function conversePart(part: ContentPart): Record<string, unknown> {
+  if (part.type === 'text') return { text: part.text ?? '' };
+  if (part.type === 'audio') throw unsupportedPart('bedrock', part);
+  const format = converseFormat(partMime(part));
+  if (!partHasBytes(part)) {
+    if (part.type === 'video' && part.url?.startsWith('s3://')) return { video: { format, source: { s3Location: { uri: part.url } } } };
+    throw unsupportedPart('bedrock', part, 'by URL (send base64 bytes)');
+  }
+  const source = { bytes: partBase64(part) };
+  if (part.type === 'image') return { image: { format, source } };
+  if (part.type === 'video') return { video: { format, source } };
+  // Converse document names allow only alphanumerics, spaces, hyphens, parens and brackets.
+  const name = (part.filename ?? 'document').replace(/\.[^.]+$/, '').replace(/[^A-Za-z0-9 \-()[\]]/g, ' ').trim() || 'document';
+  return { document: { format, name, source } };
+}
+
+/** Converse `format` from a MIME type (`image/jpeg` → `jpeg`, `application/pdf` → `pdf`, `text/plain` → `txt`). */
+function converseFormat(mime: string): string {
+  const sub = mime.split('/')[1]?.split(';')[0] ?? '';
+  if (sub === 'plain') return 'txt';
+  if (sub === 'vnd.openxmlformats-officedocument.wordprocessingml.document') return 'docx';
+  if (sub === 'vnd.openxmlformats-officedocument.spreadsheetml.sheet') return 'xlsx';
+  if (sub === 'msword') return 'doc';
+  if (sub === 'vnd.ms-excel') return 'xls';
+  if (sub === 'quicktime') return 'mov';
+  if (sub === 'x-matroska') return 'mkv';
+  return sub;
 }

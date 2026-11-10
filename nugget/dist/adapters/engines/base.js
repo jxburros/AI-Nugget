@@ -138,4 +138,39 @@ function asCapabilities(row) {
         return [value];
     return undefined;
 }
+/** Base64 payload of a non-text part (`dataBase64`, or the legacy `imageBase64`). */
+export function partBase64(part) {
+    return part.dataBase64 ?? part.imageBase64 ?? dataUrlPayload(part.url);
+}
+/** Default MIME type per part kind when the caller did not set one. */
+export function partMime(part) {
+    if (part.mimeType)
+        return part.mimeType;
+    const fromUrl = part.url?.match(/^data:([^;,]+)[;,]/)?.[1];
+    if (fromUrl)
+        return fromUrl;
+    return part.type === 'image' ? 'image/png' : part.type === 'audio' ? 'audio/wav' : part.type === 'video' ? 'video/mp4' : part.type === 'file' ? 'application/pdf' : 'text/plain';
+}
+/** A `data:` URL for the part, or its caller-supplied URL. */
+export function partUrl(part) {
+    if (part.url)
+        return part.url;
+    return `data:${partMime(part)};base64,${partBase64(part) ?? ''}`;
+}
+/** True when the part carries inline bytes rather than only a remote URL. */
+export function partHasBytes(part) {
+    return (part.dataBase64 ?? part.imageBase64) !== undefined || (part.url?.startsWith('data:') ?? false);
+}
+/** Typed, non-retryable failure for a content part this protocol cannot carry. */
+export function unsupportedPart(provider, part, detail = '') {
+    return new AIError(`${provider} cannot accept ${part.type} input${detail ? ` ${detail}` : ''} on this protocol`, { kind: 'invalid_request', retryable: false, provider });
+}
+/** Builds a {@link MediaOutput} from a `data:` URL or a remote URL. */
+export function mediaFromUrl(type, url, fallbackMime) {
+    const match = url.match(/^data:([^;,]+);base64,(.*)$/s);
+    return match ? { type, mimeType: match[1], dataBase64: match[2] } : { type, mimeType: fallbackMime, url };
+}
+function dataUrlPayload(url) {
+    return url?.match(/^data:[^,]*;base64,(.*)$/s)?.[1];
+}
 //# sourceMappingURL=base.js.map

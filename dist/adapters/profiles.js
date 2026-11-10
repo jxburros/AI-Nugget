@@ -1,7 +1,8 @@
 const HOSTED_CLOUD = { nativeTools: true, jsonMode: true, local: false, embeddable: false };
 const LOCAL_RUNTIME = { nativeTools: false, jsonMode: false, local: true, embeddable: true };
 export const PROVIDER_PROFILES = {
-    minimax: { engine: 'openaiChat', defaultBaseUrl: 'https://api.minimax.io/v1', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false, unsupportedProbe: true } },
+    // MiniMax's legacy `max_tokens` counts thinking tokens; `max_completion_tokens` caps the answer.
+    minimax: { engine: 'openaiChat', defaultBaseUrl: 'https://api.minimax.io/v1', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false, unsupportedProbe: true, maxTokensParam: 'max_completion_tokens', supportsUsageInStream: true } },
     zai: { engine: 'openaiChat', defaultBaseUrl: 'https://api.z.ai/api/paas/v4', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false, unsupportedProbe: true } },
     dashscope: { engine: 'openaiChat', defaultBaseUrl: 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, unsupportedProbe: true } },
     huggingface: { engine: 'openaiChat', defaultBaseUrl: 'https://router.huggingface.co/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false } },
@@ -35,16 +36,46 @@ export const PROVIDER_PROFILES = {
         capabilities: HOSTED_CLOUD,
         quirks: { supportsUsageInStream: true },
     },
-    groq: { engine: 'openaiChat', defaultBaseUrl: 'https://api.groq.com/openai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    deepseek: { engine: 'openaiChat', defaultBaseUrl: 'https://api.deepseek.com/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+    // Vercel AI Gateway: one key for many upstream providers, OpenAI-compatible.
+    vercel: { engine: 'openaiChat', defaultBaseUrl: 'https://ai-gateway.vercel.sh/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { supportsJsonSchema: true } },
+    // Groq deprecated `max_tokens`; its json_schema mode refuses streaming, so it stays off.
+    groq: { engine: 'openaiChat', defaultBaseUrl: 'https://api.groq.com/openai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { maxTokensParam: 'max_completion_tokens' } },
+    // DeepSeek thinking mode returns 400 on a tool-using history that omits the
+    // earlier `reasoning_content`, so assistant turns replay it verbatim.
+    deepseek: { engine: 'openaiChat', defaultBaseUrl: 'https://api.deepseek.com/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true } },
     mistral: { engine: 'openaiChat', defaultBaseUrl: 'https://api.mistral.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    together: { engine: 'openaiChat', defaultBaseUrl: 'https://api.together.xyz/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    fireworks: { engine: 'openaiChat', defaultBaseUrl: 'https://api.fireworks.ai/inference/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+    // Together moved its documented host to api.together.ai (US-only: us-api.together.ai).
+    together: { engine: 'openaiChat', defaultBaseUrl: 'https://api.together.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true } },
+    fireworks: { engine: 'openaiChat', defaultBaseUrl: 'https://api.fireworks.ai/inference/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true } },
     cerebras: { engine: 'openaiChat', defaultBaseUrl: 'https://api.cerebras.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    moonshot: { engine: 'openaiChat', defaultBaseUrl: 'https://api.moonshot.ai/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
+    // Kimi (platform.kimi.ai). Thinking models stream `reasoning_content` and
+    // require it echoed back on assistant turns in tool loops, hence
+    // preserveAssistantState. Mainland-China keys use https://api.moonshot.cn/v1.
+    moonshot: {
+        engine: 'openaiChat',
+        defaultBaseUrl: 'https://api.moonshot.ai/v1',
+        auth: 'bearer',
+        listModelsPath: '/models',
+        capabilities: HOSTED_CLOUD,
+        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, preserveAssistantState: true },
+    },
+    // Meta Model API (Muse Spark / Muse Wonder) at dev.meta.ai — OpenAI-compatible
+    // Chat Completions and Responses (`protocol: 'responses'`). Muse models always
+    // reason: `reasoningEffort: 'none'` is a 400 there.
+    meta: {
+        engine: 'openaiChat',
+        defaultBaseUrl: 'https://api.meta.ai/v1',
+        auth: 'bearer',
+        listModelsPath: '/models',
+        capabilities: HOSTED_CLOUD,
+        quirks: { maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: false },
+    },
     // Cohere's OpenAI-compatible surface lives under /compatibility/v1.
     cohere: { engine: 'openaiChat', defaultBaseUrl: 'https://api.cohere.ai/compatibility/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    // Perplexity has no public model-listing endpoint, so listModels resolves empty.
+    // Perplexity ended Sonar Chat Completions support on 2026-09-27; this URL
+    // still answers (requests are reformulated as Agent API calls). New work:
+    // baseUrl `https://api.perplexity.ai/orchestrator/v1` (Chat Completions), or
+    // `protocol: 'responses'` with baseUrl `https://api.perplexity.ai/v1` (Agent API).
     perplexity: { engine: 'openaiChat', defaultBaseUrl: 'https://api.perplexity.ai', auth: 'bearer', capabilities: HOSTED_CLOUD },
     lmstudio: {
         engine: 'openaiChat',

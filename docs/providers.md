@@ -8,7 +8,7 @@ another copy of the SSE loop. `adapterFor(provider)` lives once, in
 
 | Engine | Providers | Streaming | Tools | JSON mode |
 |---|---|---|---|---|
-| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `cohere`, `perplexity`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
+| `openaiChat` | `openai`, `azure-openai`, `openrouter`, `vercel`, `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `meta`, `cohere`, `perplexity`, `lmstudio`, `llamacpp`, `vllm`, `openai-compat` | SSE + `stream_options.include_usage` | `tools`/`tool_calls` deltas | `response_format` (`json_schema` where supported, otherwise `json_object`) |
 | `anthropic` | `anthropic` | SSE (`content_block_delta`) | `tool_use` blocks (streamed) | native JSON schema on modern Claude; legacy forced-tool fallback |
 | `google` | `google` | SSE (`streamGenerateContent`) | `functionDeclarations` | `responseMimeType` |
 | `ollama` | `ollama` | NDJSON | native `tools` | `format: json` |
@@ -37,7 +37,7 @@ column before betting a production integration on a profile.
 |---|---|---|
 | **live-matrix configured** | Configured for `tests/live-smoke.test.ts` against the real endpoint in the scheduled live matrix (`.github/workflows/live-matrix.yml`), gated on a repo secret and explicit `*_SMOKE_MODEL` repository variable | `openai`, `anthropic`, `google`, `openrouter` |
 | **manual smoke available** | Live-smoke-able locally with a running server, but not in CI (needs a reachable local daemon) | `ollama`, `llamacpp`, `lmstudio`, `vllm` |
-| **mock-verified** | Engine behavior covered by the mocked contract suite; the profile's base URL, auth mode, and quirks are believed correct but not continuously checked against the live API | `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `cohere`, `perplexity` |
+| **mock-verified** | Engine behavior covered by the mocked contract suite; the profile's base URL, auth mode, and quirks are believed correct but not continuously checked against the live API | `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `meta`, `vercel`, `cohere`, `perplexity` |
 | **configuration-only** | No fixed endpoint to verify — behavior depends entirely on what you point it at | `azure-openai` (deployment-specific URL template), `openai-compat` |
 
 The new `minimax`, `zai`, `dashscope`, `huggingface`, `deepinfra`, `sambanova`,
@@ -45,6 +45,34 @@ The new `minimax`, `zai`, `dashscope`, `huggingface`, `deepinfra`, `sambanova`,
 **mock-verified** by handler-level URL/auth/protocol tests in Node and Chromium.
 Their live behavior was not exercised during this release. A configured workflow
 or an available smoke command alone is not evidence of a successful live run.
+
+### Provider notes (checked against official docs 2026-11-10)
+
+- **`meta`** — Meta Model API (Muse Spark / Muse Wonder, keys from dev.meta.ai)
+  at `https://api.meta.ai/v1`, bearer auth. Chat Completions by default; set
+  `protocol: 'responses'` for the Responses API. Sends `max_completion_tokens`
+  and native `json_schema`. Muse models always reason: `reasoningEffort: 'none'`
+  is a 400; `xhigh`/`max` are accepted. Meta does not expose the chain of
+  thought, only `reasoning_tokens` counts.
+- **`moonshot`** — Kimi (platform.kimi.ai; `api.moonshot.ai/v1`, mainland-China
+  keys use `baseUrl: 'https://api.moonshot.cn/v1'`). Thinking models stream
+  `reasoning_content` and require it echoed back on assistant turns in tool
+  loops, so the profile preserves assistant state. K3 models take
+  `reasoningEffort` `low`/`high`/`max`; K2.x models use
+  `providerOptions.thinking`.
+- **`deepseek`, `together`, `fireworks`** — preserve assistant reasoning for
+  replay (DeepSeek returns 400 on a tool-using history without the earlier
+  `reasoning_content`). Reasoning is echoed under the field it arrived in
+  (`reasoning_content` or `reasoning`). `together` now defaults to the documented
+  `api.together.ai` host.
+- **`groq`, `minimax`** — send `max_completion_tokens` (Groq deprecated
+  `max_tokens`; MiniMax's legacy field also counts thinking tokens).
+- **`vercel`** — Vercel AI Gateway at `https://ai-gateway.vercel.sh/v1`.
+- **`perplexity`** — Perplexity ended Sonar Chat Completions support on
+  2026-09-27; the default URL still answers (requests are reformulated as Agent
+  API calls). For new work use `baseUrl: 'https://api.perplexity.ai/orchestrator/v1'`
+  (Chat Completions subset) or `protocol: 'responses'` with
+  `baseUrl: 'https://api.perplexity.ai/v1'` (Agent API).
 
 If a mock-verified provider drifts (a renamed base path, a new required header),
 the mocked suite will still pass. Report it as a bug with the provider name and
@@ -66,8 +94,8 @@ interface ProviderCapabilities {
 }
 ```
 
-Hosted cloud providers (`openai`, `azure-openai`, `openrouter`, `groq`,
-`deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`,
+Hosted cloud providers (`openai`, `azure-openai`, `openrouter`, `vercel`, `groq`,
+`deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `meta`,
 `cohere`, `perplexity`, `anthropic`, `google`) ship
 `{ nativeTools: true, jsonMode: true, local: false, embeddable: false }`. Local
 runtimes (`lmstudio`, `llamacpp`, `vllm`, and the `openai-compat` escape hatch)
@@ -127,7 +155,7 @@ to receive the raw text instead. `stripReasoningBlocks(text)` and
 
 ## Reasoning effort
 
-`ChatRequest.reasoningEffort` (`'none' | 'minimal' | 'low' | 'medium' | 'high'`)
+`ChatRequest.reasoningEffort` (`'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'`)
 is one vocabulary for "how hard should a thinking-capable model think", mapped
 onto each provider's own knob. It is only sent when you set it — non-reasoning
 models reject the parameter outright, so the nugget never guesses.
@@ -135,9 +163,17 @@ models reject the parameter outright, so the nugget never guesses.
 | Engine | Wire field | `'none'` | `'minimal'` … `'high'` |
 |---|---|---|---|
 | `openaiChat` | `reasoning_effort` | `'none'` | the word as-is |
-| `anthropic` | `thinking` | `{ type: 'disabled' }` | `{ type: 'enabled', budget_tokens }` from `REASONING_BUDGET_TOKENS` (1 024 / 2 048 / 8 192 / 16 384); `max_tokens` is raised to fit when it would not, and `temperature`/`top_p` are dropped because Anthropic refuses them alongside thinking |
-| `google` | `generationConfig.thinkingConfig.thinkingBudget` | `0` | the same token tiers |
+| `responses` | `reasoning.effort` | `'none'` | the word as-is |
+| `anthropic` (modern Claude) | `thinking: { type: 'adaptive' }` + `output_config.effort` | thinking disabled | `minimal` → `low`; others as-is (`xhigh`, `max` included) |
+| `anthropic` (older Claude) | `thinking` | `{ type: 'disabled' }` | `{ type: 'enabled', budget_tokens }` from `REASONING_BUDGET_TOKENS` (1 024 / 2 048 / 8 192 / 16 384 / 24 576 / 32 768); `max_tokens` is raised to fit when it would not, and `temperature`/`top_p` are dropped because Anthropic refuses them alongside thinking |
+| `google` (Gemini 3+) | `generationConfig.thinkingConfig.thinkingLevel` | `'minimal'` (Gemini 3 cannot fully disable thinking) | `minimal`/`low`/`medium`/`high`; `xhigh`/`max` → `high`. Level support varies by model (3 Pro: `low`/`high` only) |
+| `google` (Gemini 2.x) | `generationConfig.thinkingConfig.thinkingBudget` | `0` | the same token tiers |
 | `ollama` | `think` | `false` | `true` (Ollama has no graded effort for most models) |
+
+`xhigh` and `max` are sent as-is to OpenAI-compatible providers. OpenAI GPT-5.2+
+accepts `xhigh`; Meta Muse, Kimi K3, DeepSeek, Z.AI and Groq (per model) accept
+`max`. A provider or model without a tier answers with a typed `invalid_request`
+— the nugget does not silently downgrade.
 
 A provider-native value in `providerOptions` (`reasoning_effort`, `thinking`,
 `thinkingConfig`, `think`) wins over `reasoningEffort` on collision. The agent
@@ -160,6 +196,55 @@ tool-using turns to skip the extra round trip.
 
 For compatible endpoints, explicitly select `protocol: 'responses'` to preserve
 Responses reasoning items and native function calls; see [cloud providers](cloud-providers.md).
+
+### Gemini thought signatures
+
+Gemini 3 attaches an encrypted `thoughtSignature` to model parts and returns a
+400 if a function-call turn is replayed without it. Google results now carry the
+model turn verbatim in `providerState` (text merged, signatures kept), and the
+engine replays it for the same provider and model — `runAgent` copies it
+automatically; custom tool loops must copy `result.providerState` onto the
+assistant message. A Gemini 3 function-call turn rebuilt without state (history
+from another provider, or an app-built transcript) gets Google's documented
+`skip_thought_signature_validator` sentinel on its first call, which keeps the
+request valid at some cost to reasoning quality.
+
+## Multimodal input and media output
+
+`ContentPart.type` is `'text' | 'image' | 'audio' | 'video' | 'file'`. Non-text
+parts carry base64 bytes in `dataBase64` (images also accept the older
+`imageBase64`) or a provider-reachable `url`, plus `mimeType`; `file` parts take
+an optional `filename`.
+
+```ts
+await handler.chat(conn, { model, messages: [{ role: 'user', content: [
+  { type: 'text', text: 'Summarize the report and the call.' },
+  { type: 'file', dataBase64: pdfB64, mimeType: 'application/pdf', filename: 'q3.pdf' },
+  { type: 'audio', dataBase64: mp3B64, mimeType: 'audio/mpeg' },
+] }] });
+```
+
+| Engine | image | audio | video | file / PDF |
+|---|---|---|---|---|
+| `openaiChat` | `image_url` (bytes or URL) | `input_audio` (bytes only) | `video_url` (Kimi, Meta, Qwen extension) | `file.file_data` (bytes only) |
+| `responses` | `input_image` | — | — | `input_file` (bytes or `file_url`) |
+| `anthropic` | `image` (base64 or URL) | — | — | `document` (PDF base64/URL; `text/*` as plain text) |
+| `google` | `inlineData` bytes or `fileData` URI — all four kinds |||||
+| `converse` | `image` bytes | — | `video` bytes or `s3://` | `document` bytes |
+| `ollama` | base64 `images` | — | — | — |
+
+A cell marked — is a typed `invalid_request` before any network call: the nugget
+never drops a part from the prompt. A filled cell means the protocol has a shape
+for it, not that every model on the provider accepts that media.
+
+Media the model generates in-band is collected on `ChatResult.media`
+(`{ type: 'image' | 'audio' | 'file', mimeType, dataBase64?, url?, transcript? }`)
+and streamed as `{ type: 'context', kind: 'media', data }` events: Gemini inline
+image/audio parts, OpenRouter-style `images` on Chat Completions, Chat
+Completions audio output (MIME from `providerOptions.audio.format`; the spoken
+text is the `transcript`), and Responses `image_generation_call` results.
+Telemetry records never include media bytes. Dedicated image/speech/transcription
+endpoints remain out of scope (see the [optional operations plan](plans/optional-operations.md)).
 
 ## Stream anomalies
 

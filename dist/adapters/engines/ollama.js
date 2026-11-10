@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, ndjsonLines, postResponse } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, mapWithConcurrency, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, parseArgs, randomId, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, parseArgs, partBase64, partHasBytes, randomId, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
 /** Max concurrent /api/show probes when listing models — enough to be fast, few enough to be polite to a local daemon. */
 const SHOW_CONCURRENCY = 6;
 export class OllamaAdapter {
@@ -188,7 +188,16 @@ function body(req) {
     return applyProviderOptions(base, req.providerOptions, ['options']);
 }
 function toOllamaMessage(m) {
-    const images = typeof m.content === 'string' ? undefined : m.content.filter((part) => part.type === 'image').map((part) => part.imageBase64).filter(Boolean);
+    // Ollama's chat API carries only text and base64 images; anything else fails
+    // honestly instead of being dropped from the prompt.
+    const other = typeof m.content === 'string' ? undefined : m.content.find((part) => part.type !== 'text' && part.type !== 'image');
+    if (other)
+        throw unsupportedPart('ollama', other);
+    const imageParts = typeof m.content === 'string' ? [] : m.content.filter((part) => part.type === 'image');
+    const remote = imageParts.find((part) => !partHasBytes(part));
+    if (remote)
+        throw unsupportedPart('ollama', remote, 'by URL (send base64 bytes)');
+    const images = imageParts.map((part) => partBase64(part)).filter(Boolean);
     const message = {
         role: m.role,
         content: typeof m.content === 'string' ? m.content : m.content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n'),

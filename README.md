@@ -11,12 +11,23 @@ providers through one pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-30 provider profiles over 6 protocol engines. Runs identically in Node, the
+32 provider profiles over 6 protocol engines. Runs identically in Node, the
 browser main thread, and Web Workers using only `fetch`, `ReadableStream`,
 `AbortController`, and `TextDecoder`. MIT licensed.
 
 It is intentionally **not** a router, prompt library, memory system, or secrets
 vault: apps choose models, own prompts, store secrets, and decide policy.
+
+## Unreleased: Meta Muse, multimodal parts, deeper reasoning tiers
+
+- New `meta` (Meta Model API / Muse) and `vercel` (Vercel AI Gateway) profiles;
+  `moonshot`, `deepseek`, `together`, `fireworks`, `groq` and `minimax` profiles
+  refreshed against current provider docs ([provider notes](docs/providers.md#provider-notes-checked-against-official-docs-2026-11-10)).
+- `ContentPart` gains `audio`, `video` and `file` (PDF) parts plus `url`
+  sources; generated images/audio come back on `ChatResult.media`
+  ([multimodal](docs/providers.md#multimodal-input-and-media-output)).
+- `reasoningEffort` adds `xhigh` and `max`; Gemini 3 uses `thinkingLevel` and
+  replays thought signatures in tool loops.
 
 ## Provider and cloud expansion
 
@@ -96,7 +107,7 @@ new AIHandler({
 
 | Doc | Covers |
 |---|---|
-| [providers.md](./docs/providers.md) | The 19 profiles, which are **live-verified vs mock-verified vs config-only**, capabilities, JSON-mode/tools limits, `openai-compat`, model discovery |
+| [providers.md](./docs/providers.md) | The provider profiles, which are **live-verified vs mock-verified vs config-only**, capabilities, JSON-mode/tools limits, `openai-compat`, model discovery |
 | [reliability.md](./docs/reliability.md) | `timeoutMs` vs `idleTimeoutMs`, why retries stop after output is emitted, double-billing and idempotency, why limits are per-instance |
 | [security.md](./docs/security.md) | Key handling, redaction coverage, SSRF, opt-in injection defenses, the secure-tool recipe |
 | [agent-loop.md](./docs/agent-loop.md) | `runAgent`, tool modes, budgets and what happens mid-step, the approval gate |

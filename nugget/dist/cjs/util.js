@@ -24,7 +24,7 @@ function promptChars(messages) {
     return messages.reduce((sum, message) => {
         if (typeof message.content === 'string')
             return sum + message.content.length;
-        return sum + message.content.reduce((partSum, part) => partSum + (part.text?.length ?? 0) + (part.imageBase64?.length ?? 0), 0);
+        return sum + message.content.reduce((partSum, part) => partSum + (part.text?.length ?? 0) + (part.imageBase64?.length ?? 0) + (part.dataBase64?.length ?? 0), 0);
     }, 0);
 }
 function textFromMessages(messages) {
@@ -123,4 +123,7 @@ exports.REASONING_BUDGET_TOKENS = {
     low: 2048,
     medium: 8192,
     high: 16384,
+    xhigh: 24576,
+    // 32 768 is the largest budget Gemini 2.5 Pro accepts.
+    max: 32768,
 };

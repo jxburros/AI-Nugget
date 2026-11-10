@@ -4,11 +4,37 @@ export type { KnownProvider };
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool';
 
+/**
+ * One piece of multimodal message content. `text` parts carry `text`; every
+ * other kind carries its bytes as base64 (`dataBase64`, or the legacy
+ * `imageBase64` for images) or a provider-reachable `url`, plus a `mimeType`.
+ * Each engine maps the kinds its protocol supports and fails with a typed
+ * `invalid_request` for the rest — a part is never silently dropped.
+ */
 export interface ContentPart {
-  type: 'text' | 'image';
+  type: 'text' | 'image' | 'audio' | 'video' | 'file';
   text?: string;
+  /** Base64 image bytes (kept for compatibility; `dataBase64` works for images too). */
   imageBase64?: string;
+  /** Base64 bytes for image, audio, video or file parts (no `data:` prefix). */
+  dataBase64?: string;
+  /** A URL the provider can fetch itself (https, a provider file URI, or a `data:` URL). */
+  url?: string;
   mimeType?: string;
+  /** File name for `file` parts (several providers require one for documents). */
+  filename?: string;
+}
+
+/** Non-text output a model returned in-band with a chat response (generated image, speech). */
+export interface MediaOutput {
+  type: 'image' | 'audio' | 'file';
+  mimeType: string;
+  /** Base64 bytes, when the provider returned them inline. */
+  dataBase64?: string;
+  /** A provider-hosted URL, when the provider returned a link instead of bytes. */
+  url?: string;
+  /** Transcript or caption the provider attached (e.g. spoken audio's text). */
+  transcript?: string;
 }
 
 /** Opaque provider response content, for replay within the same model/tool workflow.
@@ -48,11 +74,14 @@ export interface ToolSchema {
  * maps one vocabulary onto each provider's own knob (see `docs/providers.md`,
  * "Reasoning effort"): OpenAI `reasoning_effort`, Anthropic `thinking`
  * (`budget_tokens` tiers), Google `generationConfig.thinkingConfig.thinkingBudget`,
- * Ollama `think`. `'none'` disables reasoning where the provider allows it.
+ * Ollama `think`. `'none'` disables reasoning where the provider allows it;
+ * `'xhigh'` and `'max'` reach the deepest tiers of providers that have them
+ * (OpenAI GPT-5.2+, Claude adaptive effort, Meta Muse, Kimi K3) and are sent
+ * as-is, so a provider without them answers with an honest 400.
  * Unset means the provider's own default — the nugget never sends the knob
  * unasked, because non-reasoning models reject it.
  */
-export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high';
+export type ReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface ChatRequest {
   model: string;
@@ -149,6 +178,8 @@ export interface Usage {
 
 export interface ChatResult {
   text: string;
+  /** Images/audio the model generated in-band (Gemini image output, chat audio, Responses image generation). */
+  media?: MediaOutput[];
   providerState?: ProviderState;
   toolCalls?: ToolCall[];
   finishReason: 'stop' | 'length' | 'tool' | 'content_filter' | 'error' | 'canceled';
@@ -214,6 +245,8 @@ export type StreamEvent =
   // `reasoning_content` deltas; providers that don't stream reasoning never emit it.
   | { type: 'reasoning'; text: string }
   | { type: 'tool_call'; call: ToolCall }
+  // In-band generated media is reported as `{ type: 'context', kind: 'media',
+  // data: MediaOutput }` as it arrives, and collected on `ChatResult.media`.
   | { type: 'context'; kind: string; data: unknown }
   | { type: 'retry'; attempt: number; reason: AIErrorKind; delayMs: number }
   | { type: 'done'; result: ChatResult }

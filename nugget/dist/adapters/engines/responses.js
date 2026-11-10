@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl } from '../../util.js';
 import { OpenAIChatAdapter } from './openaiChat.js';
-import { safeParse, streamError, streamTimeout } from './base.js';
+import { partHasBytes, partUrl, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
 /** Responses wire format shared by compatible providers. Explicit opt-in only. */
 export class ResponsesAdapter extends OpenAIChatAdapter {
     responsesProfile;
@@ -63,6 +63,7 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
                 throw invalid(`Responses request did not complete (${String(response.status)})`, conn);
             const output = response.output.map(asRecord).filter((item) => !!item);
             const toolCalls = [];
+            const media = [];
             let finalText = '';
             let refused = false;
             for (const item of output) {
@@ -88,6 +89,12 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
                         throw invalid('Malformed Responses function call', conn);
                     toolCalls.push({ id, name, arguments: args, raw });
                 }
+                else if (item.type === 'image_generation_call' && typeof item.result === 'string') {
+                    const format = asString(item.output_format) ?? 'png';
+                    const image = { type: 'image', mimeType: `image/${format === 'jpg' ? 'jpeg' : format}`, dataBase64: item.result };
+                    media.push(image);
+                    yield { type: 'context', kind: 'media', data: image };
+                }
                 else if (item.type !== 'reasoning') {
                     yield { type: 'context', kind: 'provider_output', data: item };
                 }
@@ -103,6 +110,7 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
             const outputTokens = asNumber(usage?.output_tokens);
             const result = {
                 text: finalText || text,
+                ...(media.length ? { media } : {}),
                 toolCalls: toolCalls.length ? toolCalls : undefined,
                 providerState: { provider: conn.provider, model: req.model, protocol: 'responses', content: output },
                 finishReason: response.status === 'incomplete'
@@ -140,9 +148,9 @@ function responsesBody(conn, req) {
             input.push({ type: 'function_call_output', call_id: message.toolCallId, output: typeof message.content === 'string' ? message.content : JSON.stringify(message.content) });
             continue;
         }
-        input.push({ role: message.role, content: typeof message.content === 'string' ? message.content : message.content.map(part => part.type === 'image'
-                ? { type: 'input_image', image_url: `data:${part.mimeType ?? 'image/png'};base64,${part.imageBase64 ?? ''}` }
-                : { type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text ?? '' }) });
+        input.push({ role: message.role, content: typeof message.content === 'string' ? message.content : message.content.map(part => part.type === 'text'
+                ? { type: message.role === 'assistant' ? 'output_text' : 'input_text', text: part.text ?? '' }
+                : responsesPart(part, conn.provider)) });
         for (const call of message.toolCalls ?? [])
             input.push({ type: 'function_call', call_id: call.id, name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) });
     }
@@ -156,5 +164,16 @@ function responsesBody(conn, req) {
                 ? { type: 'json_schema', name: 'response', schema: req.responseFormat.schema, strict: true }
                 : { type: 'json_object' } } : undefined,
     }, req.providerOptions);
+}
+/** Responses input parts: `input_image` and `input_file` by data URL or URL; no audio/video input. */
+function responsesPart(part, provider) {
+    if (part.type === 'image')
+        return { type: 'input_image', image_url: partUrl(part) };
+    if (part.type === 'file') {
+        return partHasBytes(part)
+            ? { type: 'input_file', filename: part.filename ?? 'document', file_data: partUrl(part) }
+            : { type: 'input_file', file_url: part.url ?? '' };
+    }
+    throw unsupportedPart(provider, part);
 }
 //# sourceMappingURL=responses.js.map

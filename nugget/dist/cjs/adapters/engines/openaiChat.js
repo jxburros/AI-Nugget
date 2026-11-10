@@ -36,6 +36,12 @@ class OpenAIChatAdapter {
         let finish;
         let sawTerminal = false;
         let reasoningText = '';
+        // Echo reasoning back under the key it arrived in: DeepSeek/Kimi/Z.AI read
+        // `reasoning_content`, Together/Groq-style servers read `reasoning`.
+        let reasoningKey = 'reasoning_content';
+        const media = [];
+        let audioData = '';
+        let audioTranscript = '';
         let assistantState;
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
@@ -78,6 +84,10 @@ class OpenAIChatAdapter {
                 assistantState = (0, util_js_1.asRecord)((0, util_js_1.asRecord)(Array.isArray(choices) ? choices[0] : undefined)?.message);
                 text = parsed.text;
                 toolCalls = parsed.toolCalls;
+                for (const item of parsed.media) {
+                    media.push(item);
+                    yield { type: 'context', kind: 'media', data: item };
+                }
                 inputTokens = parsed.inputTokens;
                 outputTokens = parsed.outputTokens;
                 finish = parsed.finish;
@@ -109,10 +119,22 @@ class OpenAIChatAdapter {
                     // Reasoning tokens (DeepSeek `reasoning_content`, others `reasoning`)
                     // ride their own channel so they don't contaminate the answer text.
                     const reasoning = (0, util_js_1.asString)(delta?.reasoning_content) ?? (0, util_js_1.asString)(delta?.reasoning);
+                    if (reasoning && (0, util_js_1.asString)(delta?.reasoning_content) === undefined)
+                        reasoningKey = 'reasoning';
                     if (reasoning)
                         reasoningText += reasoning;
                     if (reasoning)
                         yield { type: 'reasoning', text: reasoning };
+                    // In-band media: OpenRouter-style `delta.images` and chat `delta.audio`.
+                    for (const item of imagesFrom(delta?.images)) {
+                        media.push(item);
+                        yield { type: 'context', kind: 'media', data: item };
+                    }
+                    const audio = (0, util_js_1.asRecord)(delta?.audio);
+                    if (audio) {
+                        audioData += (0, util_js_1.asString)(audio.data) ?? '';
+                        audioTranscript += (0, util_js_1.asString)(audio.transcript) ?? '';
+                    }
                     const piece = (0, util_js_1.asString)(delta?.content);
                     if (piece) {
                         if (firstTokenMs === null)
@@ -141,13 +163,20 @@ class OpenAIChatAdapter {
                 for (const call of toolCalls)
                     yield { type: 'tool_call', call };
             }
+            if (audioData) {
+                const item = { type: 'audio', mimeType: audioMime(req), dataBase64: audioData, ...(audioTranscript ? { transcript: audioTranscript } : {}) };
+                media.push(item);
+                yield { type: 'context', kind: 'media', data: item };
+            }
             if (!sawTerminal)
                 yield (0, base_js_1.streamAnomaly)('stream ended without a finish_reason');
             const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
+            if (media.length)
+                result.media = media;
             if (this.profile.quirks?.preserveAssistantState) {
                 result.providerState = { provider: conn.provider, model: req.model, protocol: 'chat-completions', content: [assistantState ?? {
                             role: 'assistant', content: text,
-                            ...(reasoningText ? { reasoning_content: reasoningText } : {}),
+                            ...(reasoningText ? { [reasoningKey]: reasoningText } : {}),
                             ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })) } : {}),
                         }] };
             }
@@ -206,7 +235,7 @@ function openAiBody(req, profile, provider) {
         messages: req.messages.map(message => {
             const state = message.providerState;
             return profile.quirks?.preserveAssistantState && message.role === 'assistant' && state?.provider === provider && state.model === req.model && state.protocol === 'chat-completions'
-                ? state.content[0] ?? toOpenAiMessage(message) : toOpenAiMessage(message);
+                ? state.content[0] ?? toOpenAiMessage(message, provider) : toOpenAiMessage(message, provider);
         }),
         temperature: req.temperature,
         top_p: req.topP,
@@ -241,14 +270,12 @@ function responseFormatFor(req, profile) {
     }
     return { type: 'json_object' };
 }
-function toOpenAiMessage(message) {
+function toOpenAiMessage(message, provider) {
     return {
         role: message.role,
         content: typeof message.content === 'string'
             ? message.content
-            : message.content.map((part) => part.type === 'image'
-                ? { type: 'image_url', image_url: { url: `data:${part.mimeType ?? 'image/png'};base64,${part.imageBase64 ?? ''}` } }
-                : { type: 'text', text: part.text ?? '' }),
+            : message.content.map((part) => openAiPart(part, provider)),
         name: message.role === 'tool' ? message.name : undefined,
         tool_call_id: message.toolCallId,
         tool_calls: message.toolCalls?.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })),
@@ -267,6 +294,57 @@ function urlFor(conn, profile, req) {
     }
     return (0, util_js_1.joinUrl)(conn.baseUrl, '/chat/completions');
 }
+/**
+ * Chat Completions content parts. `image_url`, `input_audio` and `file` are
+ * OpenAI's own shapes; `video_url` is the de-facto extension used by Kimi,
+ * Meta Model API and Qwen — a server without it answers with an honest 400.
+ */
+function openAiPart(part, provider) {
+    switch (part.type) {
+        case 'image':
+            return { type: 'image_url', image_url: { url: (0, base_js_1.partUrl)(part) } };
+        case 'audio': {
+            if (!(0, base_js_1.partHasBytes)(part))
+                throw (0, base_js_1.unsupportedPart)(provider, part, 'by URL (send base64 bytes)');
+            return { type: 'input_audio', input_audio: { data: (0, base_js_1.partBase64)(part) ?? '', format: audioFormat((0, base_js_1.partMime)(part)) } };
+        }
+        case 'video':
+            return { type: 'video_url', video_url: { url: (0, base_js_1.partUrl)(part) } };
+        case 'file': {
+            if (!(0, base_js_1.partHasBytes)(part))
+                throw (0, base_js_1.unsupportedPart)(provider, part, 'by URL (send base64 bytes)');
+            return { type: 'file', file: { filename: part.filename ?? 'document', file_data: (0, base_js_1.partUrl)(part) } };
+        }
+        default:
+            return { type: 'text', text: part.text ?? '' };
+    }
+}
+/** `input_audio.format` from a MIME type (`audio/mpeg` → `mp3`, `audio/wav` → `wav`). */
+function audioFormat(mime) {
+    const sub = mime.split('/')[1]?.split(';')[0] ?? 'wav';
+    if (sub === 'mpeg' || sub === 'mp3')
+        return 'mp3';
+    if (sub === 'x-wav' || sub === 'wave')
+        return 'wav';
+    return sub;
+}
+/** MIME type of chat audio output, from the request's `providerOptions.audio.format`. */
+function audioMime(req) {
+    const format = (0, util_js_1.asString)((0, util_js_1.asRecord)(req.providerOptions?.audio)?.format);
+    if (format === 'mp3')
+        return 'audio/mpeg';
+    if (format === 'pcm16')
+        return 'audio/pcm';
+    return format ? `audio/${format}` : 'audio/wav';
+}
+/** OpenRouter-style `images: [{ type: 'image_url', image_url: { url } }]` output. */
+function imagesFrom(value) {
+    if (!Array.isArray(value))
+        return [];
+    return value.map((item) => (0, util_js_1.asString)((0, util_js_1.asRecord)((0, util_js_1.asRecord)(item)?.image_url)?.url) ?? (0, util_js_1.asString)((0, util_js_1.asRecord)(item)?.url))
+        .filter((url) => !!url)
+        .map((url) => (0, base_js_1.mediaFromUrl)('image', url, 'image/png'));
+}
 function parseOpenAiResponse(raw) {
     const record = (0, util_js_1.asRecord)(raw);
     const usage = (0, util_js_1.asRecord)(record?.usage);
@@ -275,9 +353,17 @@ function parseOpenAiResponse(raw) {
     const text = (0, util_js_1.asString)(message?.content) ?? (0, util_js_1.asString)(record?.text) ?? '';
     const reasoning = (0, util_js_1.asString)(message?.reasoning_content) ?? (0, util_js_1.asString)(message?.reasoning);
     const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+    const media = imagesFrom(message?.images);
+    const audio = (0, util_js_1.asRecord)(message?.audio);
+    const audioData = (0, util_js_1.asString)(audio?.data);
+    if (audioData) {
+        const transcript = (0, util_js_1.asString)(audio?.transcript);
+        media.push({ type: 'audio', mimeType: 'audio/wav', dataBase64: audioData, ...(transcript ? { transcript } : {}) });
+    }
     return {
         text,
         reasoning,
+        media,
         finish: (0, util_js_1.asString)(choice?.finish_reason),
         toolCalls: calls.map((value) => {
             const call = (0, util_js_1.asRecord)(value);

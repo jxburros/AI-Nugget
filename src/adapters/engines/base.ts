@@ -1,6 +1,6 @@
 import { AIError, fromUnknown } from '../../errors.js';
 import { fetchJson, withTimeout } from '../../transport.js';
-import type { ModelInfo, ResolvedConnection } from '../../types.js';
+import type { ContentPart, MediaOutput, ModelInfo, ResolvedConnection } from '../../types.js';
 import { asRecord, asString, joinUrl } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
 
@@ -133,4 +133,43 @@ function asCapabilities(row: Record<string, unknown> | undefined): string[] | un
   if (Array.isArray(value) && value.every((entry) => typeof entry === 'string')) return value as string[];
   if (typeof value === 'string') return [value];
   return undefined;
+}
+
+/** Base64 payload of a non-text part (`dataBase64`, or the legacy `imageBase64`). */
+export function partBase64(part: ContentPart): string | undefined {
+  return part.dataBase64 ?? part.imageBase64 ?? dataUrlPayload(part.url);
+}
+
+/** Default MIME type per part kind when the caller did not set one. */
+export function partMime(part: ContentPart): string {
+  if (part.mimeType) return part.mimeType;
+  const fromUrl = part.url?.match(/^data:([^;,]+)[;,]/)?.[1];
+  if (fromUrl) return fromUrl;
+  return part.type === 'image' ? 'image/png' : part.type === 'audio' ? 'audio/wav' : part.type === 'video' ? 'video/mp4' : part.type === 'file' ? 'application/pdf' : 'text/plain';
+}
+
+/** A `data:` URL for the part, or its caller-supplied URL. */
+export function partUrl(part: ContentPart): string {
+  if (part.url) return part.url;
+  return `data:${partMime(part)};base64,${partBase64(part) ?? ''}`;
+}
+
+/** True when the part carries inline bytes rather than only a remote URL. */
+export function partHasBytes(part: ContentPart): boolean {
+  return (part.dataBase64 ?? part.imageBase64) !== undefined || (part.url?.startsWith('data:') ?? false);
+}
+
+/** Typed, non-retryable failure for a content part this protocol cannot carry. */
+export function unsupportedPart(provider: string, part: ContentPart, detail = ''): AIError {
+  return new AIError(`${provider} cannot accept ${part.type} input${detail ? ` ${detail}` : ''} on this protocol`, { kind: 'invalid_request', retryable: false, provider });
+}
+
+/** Builds a {@link MediaOutput} from a `data:` URL or a remote URL. */
+export function mediaFromUrl(type: MediaOutput['type'], url: string, fallbackMime: string): MediaOutput {
+  const match = url.match(/^data:([^;,]+);base64,(.*)$/s);
+  return match ? { type, mimeType: match[1]!, dataBase64: match[2]! } : { type, mimeType: fallbackMime, url };
+}
+
+function dataUrlPayload(url: string | undefined): string | undefined {
+  return url?.match(/^data:[^,]*;base64,(.*)$/s)?.[1];
 }

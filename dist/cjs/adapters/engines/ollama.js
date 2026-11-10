@@ -192,7 +192,16 @@ function body(req) {
     return (0, util_js_1.applyProviderOptions)(base, req.providerOptions, ['options']);
 }
 function toOllamaMessage(m) {
-    const images = typeof m.content === 'string' ? undefined : m.content.filter((part) => part.type === 'image').map((part) => part.imageBase64).filter(Boolean);
+    // Ollama's chat API carries only text and base64 images; anything else fails
+    // honestly instead of being dropped from the prompt.
+    const other = typeof m.content === 'string' ? undefined : m.content.find((part) => part.type !== 'text' && part.type !== 'image');
+    if (other)
+        throw (0, base_js_1.unsupportedPart)('ollama', other);
+    const imageParts = typeof m.content === 'string' ? [] : m.content.filter((part) => part.type === 'image');
+    const remote = imageParts.find((part) => !(0, base_js_1.partHasBytes)(part));
+    if (remote)
+        throw (0, base_js_1.unsupportedPart)('ollama', remote, 'by URL (send base64 bytes)');
+    const images = imageParts.map((part) => (0, base_js_1.partBase64)(part)).filter(Boolean);
     const message = {
         role: m.role,
         content: typeof m.content === 'string' ? m.content : m.content.filter((part) => part.type === 'text').map((part) => part.text ?? '').join('\n'),

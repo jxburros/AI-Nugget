@@ -61,7 +61,7 @@ export interface ProviderProfile {
  * type `Connection.provider` so IDEs autocomplete valid names and typos are a
  * compile error rather than a silent fall-through to `openai-compat`.
  */
-export type KnownProvider = 'openai' | 'azure-openai' | 'openrouter' | 'groq' | 'deepseek' | 'mistral' | 'together' | 'fireworks' | 'cerebras' | 'moonshot' | 'cohere' | 'perplexity' | 'lmstudio' | 'llamacpp' | 'vllm' | 'ollama' | 'anthropic' | 'google' | 'minimax' | 'zai' | 'dashscope' | 'huggingface' | 'deepinfra' | 'sambanova' | 'nvidia' | 'cloudflare' | 'bedrock' | 'vertex' | 'azure-openai-v1' | 'openai-compat';
+export type KnownProvider = 'openai' | 'azure-openai' | 'openrouter' | 'groq' | 'deepseek' | 'mistral' | 'together' | 'fireworks' | 'cerebras' | 'moonshot' | 'meta' | 'vercel' | 'cohere' | 'perplexity' | 'lmstudio' | 'llamacpp' | 'vllm' | 'ollama' | 'anthropic' | 'google' | 'minimax' | 'zai' | 'dashscope' | 'huggingface' | 'deepinfra' | 'sambanova' | 'nvidia' | 'cloudflare' | 'bedrock' | 'vertex' | 'azure-openai-v1' | 'openai-compat';
 export declare const PROVIDER_PROFILES: Record<KnownProvider, ProviderProfile> & Record<string, ProviderProfile>;
 export declare function profileFor(provider: string, baseUrl?: string): ProviderProfile;
 export declare function applyAuth(profile: ProviderProfile, apiKey: string | null, headers: Record<string, string>): Record<string, string>;

@@ -1,6 +1,6 @@
 import { AIError } from '../../errors.js';
 import { withTimeout } from '../../transport.js';
-import type { ModelInfo, ResolvedConnection } from '../../types.js';
+import type { ContentPart, MediaOutput, ModelInfo, ResolvedConnection } from '../../types.js';
 import type { ProviderProfile } from '../profiles.js';
 export declare const DEFAULT_TIMEOUT_MS = 120000;
 /**
@@ -47,4 +47,16 @@ export declare function streamAnomaly(reason?: string): {
     kind: string;
     data: unknown;
 };
+/** Base64 payload of a non-text part (`dataBase64`, or the legacy `imageBase64`). */
+export declare function partBase64(part: ContentPart): string | undefined;
+/** Default MIME type per part kind when the caller did not set one. */
+export declare function partMime(part: ContentPart): string;
+/** A `data:` URL for the part, or its caller-supplied URL. */
+export declare function partUrl(part: ContentPart): string;
+/** True when the part carries inline bytes rather than only a remote URL. */
+export declare function partHasBytes(part: ContentPart): boolean;
+/** Typed, non-retryable failure for a content part this protocol cannot carry. */
+export declare function unsupportedPart(provider: string, part: ContentPart, detail?: string): AIError;
+/** Builds a {@link MediaOutput} from a `data:` URL or a remote URL. */
+export declare function mediaFromUrl(type: MediaOutput['type'], url: string, fallbackMime: string): MediaOutput;
 //# sourceMappingURL=base.d.ts.map

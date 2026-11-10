@@ -2,7 +2,7 @@ import { AIError, classify } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, parseArgs, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, parseArgs, partBase64, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
 const JSON_MODE_TOOL = 'json_output';
 export class AnthropicAdapter {
     provider;
@@ -325,13 +325,33 @@ function toAnthropicMessage(m, model) {
         content: typeof m.content === 'string' ? m.content : contentBlocks(m.content),
     };
 }
-/** Maps text/image content — a string or a ContentPart[] — onto Anthropic content blocks. */
+/** Maps text/image/document content — a string or a ContentPart[] — onto Anthropic content blocks. */
 function contentBlocks(content) {
     if (typeof content === 'string')
         return content ? [{ type: 'text', text: content }] : [];
-    return content.map((part) => part.type === 'image'
-        ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
-        : { type: 'text', text: part.text ?? '' });
+    return content.map(anthropicBlock);
+}
+/**
+ * Images and documents (PDF, plain text) by base64 or URL. Claude has no
+ * audio or video input, so those fail as a typed `invalid_request`.
+ */
+function anthropicBlock(part) {
+    if (part.type === 'text')
+        return { type: 'text', text: part.text ?? '' };
+    if (part.type === 'audio' || part.type === 'video')
+        throw unsupportedPart('anthropic', part);
+    const blockType = part.type === 'image' ? 'image' : 'document';
+    const mime = partMime(part);
+    const source = !partHasBytes(part)
+        ? { type: 'url', url: part.url ?? '' }
+        : blockType === 'document' && mime.startsWith('text/')
+            ? { type: 'text', media_type: 'text/plain', data: decodeBase64Text(partBase64(part) ?? '') }
+            : { type: 'base64', media_type: mime, data: partBase64(part) ?? '' };
+    return { type: blockType, source, ...(blockType === 'document' && part.filename ? { title: part.filename } : {}) };
+}
+function decodeBase64Text(data) {
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
 }
 function textContent(content) {
     if (typeof content === 'string')
