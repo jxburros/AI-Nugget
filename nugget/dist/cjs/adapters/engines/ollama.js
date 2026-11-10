@@ -36,6 +36,10 @@ class OllamaAdapter {
         const toolCalls = [];
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw (0, base_js_1.mcpUnsupported)(conn.provider, 'chat');
+        if (req.promptCache)
+            yield (0, base_js_1.promptCacheUnsupported)(conn.provider);
         try {
             const res = await (0, transport_js_1.postResponse)((0, util_js_1.joinUrl)(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
             for await (const value of (0, transport_js_1.ndjsonLines)(res)) {

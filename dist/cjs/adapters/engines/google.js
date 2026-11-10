@@ -29,6 +29,7 @@ class GoogleAdapter {
         let text = '';
         let inputTokens;
         let outputTokens;
+        let cachedTokens;
         let finish;
         const toolCalls = [];
         const media = [];
@@ -37,6 +38,10 @@ class GoogleAdapter {
         const modelParts = [];
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw (0, base_js_1.mcpUnsupported)(conn.provider, 'generateContent');
+        if (req.promptCache)
+            yield (0, base_js_1.promptCacheUnsupported)(conn.provider);
         // Gemini rejects `responseMimeType: application/json` combined with function
         // declarations, so `body()` drops JSON mode when tools are present. Surface
         // that downgrade instead of silently returning unstructured text.
@@ -98,6 +103,7 @@ class GoogleAdapter {
                 const usage = (0, util_js_1.asRecord)(record?.usageMetadata);
                 inputTokens = (0, util_js_1.asNumber)(usage?.promptTokenCount) ?? inputTokens;
                 outputTokens = (0, util_js_1.asNumber)(usage?.candidatesTokenCount) ?? outputTokens;
+                cachedTokens = (0, util_js_1.asNumber)(usage?.cachedContentTokenCount) ?? cachedTokens;
             }
             if (!finish)
                 yield (0, base_js_1.streamAnomaly)('stream ended without a finishReason');
@@ -108,7 +114,7 @@ class GoogleAdapter {
                     providerState: { provider: conn.provider, model: req.model, content: [{ role: 'model', parts: modelParts }] },
                     toolCalls: hasTools ? toolCalls : undefined,
                     finishReason: mapFinish(finish, hasTools),
-                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : (0, tokens_js_1.estimatedUsage)((0, util_js_1.textFromMessages)(req.messages), text),
+                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, ...(cachedTokens !== undefined ? { cachedInputTokens: cachedTokens } : {}), estimated: false } : (0, tokens_js_1.estimatedUsage)((0, util_js_1.textFromMessages)(req.messages), text),
                     timing: { firstTokenMs, totalMs: Date.now() - started },
                     model: req.model,
                     source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },

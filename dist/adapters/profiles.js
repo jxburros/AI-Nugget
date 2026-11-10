@@ -12,14 +12,14 @@ export const PROVIDER_PROFILES = {
     cloudflare: { engine: 'openaiChat', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { responsesStreaming: false, embeddings: true, preserveAssistantState: true, unsupportedProbe: true } },
     bedrock: { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { preserveAssistantState: true, embeddings: false } },
     vertex: { engine: 'openaiChat', auth: 'bearer', capabilities: HOSTED_CLOUD, quirks: { embeddings: false, unsupportedProbe: true } },
-    'azure-openai-v1': { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: true } },
+    'azure-openai-v1': { engine: 'openaiChat', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD, quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: true, promptCache: true } },
     openai: {
         engine: 'openaiChat',
         defaultBaseUrl: 'https://api.openai.com/v1',
         auth: 'bearer',
         listModelsPath: '/models',
         capabilities: HOSTED_CLOUD,
-        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, supportsIdempotencyKey: true },
+        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, supportsIdempotencyKey: true, promptCache: true },
     },
     'azure-openai': {
         engine: 'openaiChat',
@@ -68,15 +68,22 @@ export const PROVIDER_PROFILES = {
         auth: 'bearer',
         listModelsPath: '/models',
         capabilities: HOSTED_CLOUD,
-        quirks: { maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: false },
+        quirks: { maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, embeddings: false, promptCache: true },
     },
     // Cohere's OpenAI-compatible surface lives under /compatibility/v1.
     cohere: { engine: 'openaiChat', defaultBaseUrl: 'https://api.cohere.ai/compatibility/v1', auth: 'bearer', listModelsPath: '/models', capabilities: HOSTED_CLOUD },
-    // Perplexity ended Sonar Chat Completions support on 2026-09-27; this URL
-    // still answers (requests are reformulated as Agent API calls). New work:
-    // baseUrl `https://api.perplexity.ai/orchestrator/v1` (Chat Completions), or
-    // `protocol: 'responses'` with baseUrl `https://api.perplexity.ai/v1` (Agent API).
-    perplexity: { engine: 'openaiChat', defaultBaseUrl: 'https://api.perplexity.ai', auth: 'bearer', capabilities: HOSTED_CLOUD },
+    // Perplexity ended Sonar Chat Completions support on 2026-09-27. Since 0.8.0
+    // the default is the Orchestrator Chat Completions endpoint, which takes
+    // catalog model IDs (`creator/model`). Pre-0.8 behavior: baseUrl
+    // `https://api.perplexity.ai`. Agent API: `protocol: 'responses'` with baseUrl
+    // `https://api.perplexity.ai/v1`. No documented Orchestrator model listing.
+    perplexity: {
+        engine: 'openaiChat',
+        defaultBaseUrl: 'https://api.perplexity.ai/orchestrator/v1',
+        auth: 'bearer',
+        capabilities: HOSTED_CLOUD,
+        quirks: { supportsUsageInStream: true, maxTokensParam: 'max_completion_tokens', supportsJsonSchema: true, preserveAssistantState: true },
+    },
     lmstudio: {
         engine: 'openaiChat',
         defaultBaseUrl: 'http://localhost:1234/v1',
@@ -126,6 +133,17 @@ export const PROVIDER_PROFILES = {
         defaultBaseUrl: 'https://generativelanguage.googleapis.com',
         auth: 'x-goog-api-key',
         capabilities: HOSTED_CLOUD,
+    },
+    // Any server implementing the Open Responses specification (openresponses.org):
+    // the Responses wire format by default, at `{baseUrl}/responses`. Point
+    // baseUrl at the server's `/v1` (e.g. `http://localhost:11434/v1`).
+    'open-responses': {
+        engine: 'openaiChat',
+        auth: 'bearer',
+        listModelsPath: '/models',
+        defaultProtocol: 'responses',
+        capabilities: LOCAL_RUNTIME,
+        quirks: { keyOptional: true, embeddings: false },
     },
     'openai-compat': {
         engine: 'openaiChat',

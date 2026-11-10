@@ -3,9 +3,37 @@
 All notable changes to AI Nugget are recorded here. This project follows the
 phased build in `development-plan.md`; entries note which phase they advance.
 
-## 2026-11-10 - Claude
+## 2026-11-10 - Claude — 0.8.0
 
 ### Changed
+- **Perplexity (breaking):** the profile now defaults to the Orchestrator API
+  (`https://api.perplexity.ai/orchestrator/v1`) with stream usage, strict
+  `json_schema`, `max_completion_tokens` and reasoning replay, because Sonar
+  Chat Completions support ended 2026-09-27. Notice in README, UPGRADING and
+  the release notes; `baseUrl: 'https://api.perplexity.ai'` restores the old URL.
+- `ChatRequest.promptCache` (`key`, `retention`) maps to Anthropic automatic
+  `cache_control` and OpenAI-family `prompt_cache_key` /
+  `prompt_cache_retention` / `prompt_cache_options` (new `promptCache` quirk:
+  openai, azure-openai-v1, meta); other engines emit `prompt_cache_unsupported`.
+- `Usage.cachedInputTokens` / `cacheWriteTokens` from every engine that reports
+  them; Anthropic and Converse `inputTokens` now include cached tokens.
+- Rate-limit headers (IETF `RateLimit`/`RateLimit-Policy`, `x-ratelimit-*`,
+  `anthropic-ratelimit-*`, `retry-after-ms`) parsed by `parseRateLimitHeaders`
+  onto `ChatResult.rateLimit`, `AIError.rateLimit` and `CallRecord.rateLimit`;
+  a 429 without `Retry-After` waits for the exhausted window's reset.
+- Standard JSON Schema: `standardJsonSchema()`, `chatParsed` derives its
+  provider schema from the validator, `defineTool({ input })` derives
+  `parameters` and validates arguments with the schema itself.
+- Open Responses: `open-responses` profile (Responses protocol by default via
+  the new `defaultProtocol` profile field); `response.failed` error types map
+  to typed kinds; `slug:name` extension events surface as `provider_event`;
+  `response.reasoning_text.delta` streams as reasoning.
+- Provider-hosted MCP: `ChatRequest.mcpServers` (and `AgentOptions`) for the
+  Anthropic MCP connector (beta header added automatically) and Responses
+  `mcp` tools; tokens resolve through `KeySource` and are redacted;
+  `GovernancePolicy.checkMcpServer` and `mcpServerAllowlistPolicy`; `https`
+  required; other engines fail with `invalid_request`.
+- Chat Completions/Responses send only tool `name`/`description`/`parameters`.
 - Added `meta` (Meta Model API: Muse Spark/Wonder, `https://api.meta.ai/v1`) and
   `vercel` (Vercel AI Gateway) profiles.
 - Refreshed profiles against official docs: `moonshot` (max_completion_tokens,
@@ -27,13 +55,17 @@ phased build in `development-plan.md`; entries note which phase they advance.
 ### Not completed
 - Live provider calls: no credentials available; all new and changed profiles
   are mock-verified only.
-- Perplexity's default base URL is unchanged pending a maintainer decision.
 - OpenRouter/Vercel `reasoning_details` replay is not implemented.
-- No version bump; `release.json` is unchanged.
+- MCP approval round-trips (`mcp_approval_request` → `mcp_approval_response`)
+  are surfaced as `provider_output` events but not modeled; use
+  `requireApproval: 'never'` or handle them in the app.
+- Open Responses WebSocket transport and `/responses/compact` are not implemented.
 
 ### Notes
-- Validation: `npm test` (304 passed), `npm run test:browser` (304 passed),
-  `npm run lint`, `npm run build`, `npm run build:nugget`.
+- Validation: `npm test` (324 passed), `npm run test:browser` (324 passed),
+  `npm run lint`, `npm run typecheck`, `npm run build`, `npm run build:nugget`.
+- Version 0.7.5 → 0.8.0 (minor, not patch: the Perplexity default endpoint and
+  the `inputTokens` definition change observable behavior).
 
 ## 2026-10-27 - Codex — 0.7.5
 

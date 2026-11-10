@@ -173,4 +173,12 @@ export function mediaFromUrl(type, url, fallbackMime) {
 function dataUrlPayload(url) {
     return url?.match(/^data:[^,]*;base64,(.*)$/s)?.[1];
 }
+/** Context event for a provider with no request-level prompt-cache control. */
+export function promptCacheUnsupported(provider) {
+    return { type: 'context', kind: 'prompt_cache_unsupported', data: { provider, reason: 'This provider has no request-level prompt-cache control here; any caching it does is implicit.' } };
+}
+/** Typed failure when a protocol cannot hand MCP servers to the provider. */
+export function mcpUnsupported(provider, protocol) {
+    return new AIError(`${provider} ${protocol} cannot connect provider-hosted MCP servers; use protocol: 'responses' or the anthropic engine`, { kind: 'invalid_request', retryable: false, provider });
+}
 //# sourceMappingURL=base.js.map

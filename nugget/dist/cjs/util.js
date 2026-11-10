@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.REASONING_BUDGET_TOKENS = void 0;
+exports.MCP_TOKEN = exports.REASONING_BUDGET_TOKENS = void 0;
 exports.asRecord = asRecord;
 exports.asString = asString;
 exports.asNumber = asNumber;
@@ -11,6 +11,7 @@ exports.applyProviderOptions = applyProviderOptions;
 exports.joinUrl = joinUrl;
 exports.mapWithConcurrency = mapWithConcurrency;
 exports.sleep = sleep;
+exports.mcpToken = mcpToken;
 function asRecord(value) {
     return value && typeof value === 'object' && !Array.isArray(value) ? value : undefined;
 }
@@ -127,3 +128,13 @@ exports.REASONING_BUDGET_TOKENS = {
     // 32 768 is the largest budget Gemini 2.5 Pro accepts.
     max: 32768,
 };
+/**
+ * Internal field carrying a handler-resolved MCP token to an engine. Not part
+ * of the public contract: callers supply `McpServer.authorization` (a KeyRef).
+ */
+exports.MCP_TOKEN = '__resolvedAuthorization';
+/** The handler-resolved token for a provider-hosted MCP server, if any. */
+function mcpToken(server) {
+    const value = server[exports.MCP_TOKEN];
+    return typeof value === 'string' ? value : undefined;
+}

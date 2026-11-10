@@ -41,7 +41,12 @@ myprovider: {
 
 Available `quirks`: `keyOptional`, `modelOptional`, `urlTemplate`,
 `supportsUsageInStream`, `maxTokensRequired`,
-`maxTokensParam: 'max_tokens' | 'max_completion_tokens'`, `supportsJsonSchema`.
+`maxTokensParam: 'max_tokens' | 'max_completion_tokens'`, `supportsJsonSchema`,
+`preserveAssistantState` (replay reasoning/tool state; required where the
+provider rejects a tool history without earlier `reasoning_content`),
+`promptCache` (OpenAI-family `prompt_cache_key`/retention fields), and
+`embeddings`. A profile may also set `defaultProtocol: 'responses'` for servers
+whose native surface is the Responses API (see `open-responses`).
 Only set `supportsUsageInStream` when the server actually accepts
 `stream_options.include_usage` — local servers that don't must never receive it.
 

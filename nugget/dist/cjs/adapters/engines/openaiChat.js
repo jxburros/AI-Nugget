@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.OpenAIChatAdapter = void 0;
 exports.shouldRetryWithoutReasoningEffort = shouldRetryWithoutReasoningEffort;
+exports.openAiPromptCache = openAiPromptCache;
 const errors_js_1 = require("../../errors.js");
 const tokens_js_1 = require("../../tokens.js");
 const transport_js_1 = require("../../transport.js");
@@ -45,6 +46,11 @@ class OpenAIChatAdapter {
         let assistantState;
         const timeout = (0, base_js_1.streamTimeout)(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw (0, base_js_1.mcpUnsupported)(conn.provider, 'Chat Completions');
+        if (req.promptCache && !this.profile.quirks?.promptCache)
+            yield (0, base_js_1.promptCacheUnsupported)(conn.provider);
+        let cachedTokens;
         try {
             let res;
             try {
@@ -89,6 +95,7 @@ class OpenAIChatAdapter {
                     yield { type: 'context', kind: 'media', data: item };
                 }
                 inputTokens = parsed.inputTokens;
+                cachedTokens = parsed.cachedTokens;
                 outputTokens = parsed.outputTokens;
                 finish = parsed.finish;
                 sawTerminal = true;
@@ -110,6 +117,7 @@ class OpenAIChatAdapter {
                     const usage = (0, util_js_1.asRecord)(record.usage);
                     inputTokens = (0, util_js_1.asNumber)(usage?.prompt_tokens) ?? inputTokens;
                     outputTokens = (0, util_js_1.asNumber)(usage?.completion_tokens) ?? outputTokens;
+                    cachedTokens = (0, util_js_1.asNumber)((0, util_js_1.asRecord)(usage?.prompt_tokens_details)?.cached_tokens) ?? cachedTokens;
                     const choices = Array.isArray(record.choices) ? record.choices : [];
                     const choice = (0, util_js_1.asRecord)(choices[0]);
                     finish = (0, util_js_1.asString)(choice?.finish_reason) ?? finish;
@@ -173,6 +181,8 @@ class OpenAIChatAdapter {
             const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
             if (media.length)
                 result.media = media;
+            if (cachedTokens !== undefined && !result.usage.estimated)
+                result.usage.cachedInputTokens = cachedTokens;
             if (this.profile.quirks?.preserveAssistantState) {
                 result.providerState = { provider: conn.provider, model: req.model, protocol: 'chat-completions', content: [assistantState ?? {
                             role: 'assistant', content: text,
@@ -241,7 +251,7 @@ function openAiBody(req, profile, provider) {
         top_p: req.topP,
         stop: req.stopSequences,
         response_format: responseFormatFor(req, profile),
-        tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
+        tools: req.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
         tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
         stream: true,
         // Many OpenAI-compatible local servers (llama.cpp, LM Studio, vLLM) choke
@@ -258,6 +268,8 @@ function openAiBody(req, profile, provider) {
     // providerOptions carries OpenAI-native fields the nugget doesn't model
     // (`reasoning_effort`, `parallel_tool_calls`, `seed`, `logprobs`, …). `apiVersion`
     // is consumed by urlFor for Azure and stripped here so it never hits the body.
+    if (req.promptCache && profile.quirks?.promptCache)
+        Object.assign(body, openAiPromptCache(req));
     const { apiVersion, ...passthrough } = req.providerOptions ?? {};
     void apiVersion;
     return (0, util_js_1.applyProviderOptions)(body, Object.keys(passthrough).length ? passthrough : undefined);
@@ -373,6 +385,7 @@ function parseOpenAiResponse(raw) {
         }),
         inputTokens: (0, util_js_1.asNumber)(usage?.prompt_tokens),
         outputTokens: (0, util_js_1.asNumber)(usage?.completion_tokens),
+        cachedTokens: (0, util_js_1.asNumber)((0, util_js_1.asRecord)(usage?.prompt_tokens_details)?.cached_tokens),
     };
 }
 function makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens) {
@@ -416,4 +429,30 @@ function shouldRetryWithoutReasoningEffort(error, req) {
         return false;
     const text = `${error.raw ?? ''} ${error.message}`.toLowerCase();
     return text.includes('reasoning_effort') && text.includes('tool');
+}
+/**
+ * OpenAI-family prompt-cache fields. `extended` asks for the longer lifetime:
+ * `prompt_cache_options.ttl: '12h'` on the Responses API for GPT-5.6+, and
+ * `prompt_cache_retention: '24h'` everywhere else.
+ */
+function openAiPromptCache(req, responsesApi = false) {
+    const out = {};
+    if (req.promptCache?.key)
+        out.prompt_cache_key = req.promptCache.key;
+    if (req.promptCache?.retention === 'extended') {
+        if (responsesApi && newCacheModel(req.model))
+            out.prompt_cache_options = { ttl: '12h' };
+        else
+            out.prompt_cache_retention = '24h';
+    }
+    return out;
+}
+/** GPT-5.6 and later use `prompt_cache_options` instead of `prompt_cache_retention`. */
+function newCacheModel(model) {
+    const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(model);
+    if (!match)
+        return false;
+    const major = Number(match[1]);
+    const minor = Number(match[2] ?? 0);
+    return major > 5 || (major === 5 && minor >= 6);
 }

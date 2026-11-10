@@ -1,6 +1,6 @@
 import { AIError } from '../../errors.js';
 import { withTimeout } from '../../transport.js';
-import type { ContentPart, MediaOutput, ModelInfo, ResolvedConnection } from '../../types.js';
+import type { ContentPart, MediaOutput, ModelInfo, ResolvedConnection, StreamEvent } from '../../types.js';
 import type { ProviderProfile } from '../profiles.js';
 export declare const DEFAULT_TIMEOUT_MS = 120000;
 /**
@@ -59,4 +59,8 @@ export declare function partHasBytes(part: ContentPart): boolean;
 export declare function unsupportedPart(provider: string, part: ContentPart, detail?: string): AIError;
 /** Builds a {@link MediaOutput} from a `data:` URL or a remote URL. */
 export declare function mediaFromUrl(type: MediaOutput['type'], url: string, fallbackMime: string): MediaOutput;
+/** Context event for a provider with no request-level prompt-cache control. */
+export declare function promptCacheUnsupported(provider: string): StreamEvent;
+/** Typed failure when a protocol cannot hand MCP servers to the provider. */
+export declare function mcpUnsupported(provider: string, protocol: string): AIError;
 //# sourceMappingURL=base.d.ts.map

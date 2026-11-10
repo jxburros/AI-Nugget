@@ -1,5 +1,5 @@
 import type { AIHandler } from '../handler.js';
-import type { AIErrorKind, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
+import type { AIErrorKind, ChatMessage, ChatRequest, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
 import type { ToolSpec } from './tools.js';
 export interface AgentOptions {
     handler: AIHandler;
@@ -34,6 +34,10 @@ export interface AgentOptions {
     reasoningEffort?: ReasoningEffort;
     /** Provider-native passthrough forwarded to every turn — see {@link ChatRequest.providerOptions}. */
     providerOptions?: Record<string, unknown>;
+    /** Prompt-cache controls forwarded to every turn — see {@link ChatRequest.promptCache}. */
+    promptCache?: ChatRequest['promptCache'];
+    /** Provider-hosted MCP servers forwarded to every turn — see {@link ChatRequest.mcpServers}. */
+    mcpServers?: ChatRequest['mcpServers'];
     budget?: {
         maxSteps?: number;
         maxTokens?: number;

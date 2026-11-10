@@ -1,5 +1,40 @@
 # Upgrading
 
+## 0.7.5 → 0.8.0
+
+**Read this before updating if you use Perplexity or price Anthropic/Bedrock usage.**
+
+- **Perplexity endpoint (breaking for `perplexity` connections).** Perplexity
+  ended Sonar Chat Completions support on 2026-09-27; the old endpoint still
+  answers for now by converting requests into Agent API calls. The `perplexity`
+  profile now defaults to the Orchestrator Chat Completions API,
+  `https://api.perplexity.ai/orchestrator/v1`, which:
+  - takes catalog model IDs (`creator/model`, e.g. `perplexity/sonar`), not `sonar`;
+  - returns citations as `url_citation` annotations rather than a `citations` array;
+  - honors `stream_options.include_usage`, strict `json_schema`, `max_completion_tokens`
+    and `reasoning_effort` (`none` … `max`).
+
+  To keep the pre-0.8 behavior, pin it on the connection:
+
+  ```ts
+  const pplx = { id: 'pplx', provider: 'perplexity', baseUrl: 'https://api.perplexity.ai', keyRef };
+  ```
+
+  For Perplexity's Agent API instead, use `protocol: 'responses'` with
+  `baseUrl: 'https://api.perplexity.ai/v1'`.
+- **`usage.inputTokens` is now the total prompt size everywhere.** Anthropic and
+  Bedrock Converse report cache reads/writes outside their own input count; the
+  nugget now adds them back in and exposes the split as `cachedInputTokens` and
+  `cacheWriteTokens`. A `pricing` hook that charged `inputTokens` at the full
+  rate and cache tokens separately must subtract them first.
+- **Tool definitions on the wire.** Chat Completions and Responses requests now
+  send only a tool's `name`, `description` and `parameters`. Extra properties on
+  a tool object (`sideEffects`, the new `input` schema) are no longer serialized.
+- Everything else is additive: `promptCache`, `mcpServers`, `rateLimit` on
+  results/errors/telemetry, `defineTool({ input })`, the `open-responses`
+  profile, `GovernancePolicy.checkMcpServer`, plus the 2026-11-10 provider,
+  multimodal and reasoning additions listed in the [changelog](./CHANGELOG.md).
+
 ## 0.7.4 → 0.7.5
 
 Existing connections keep their protocol and URLs. New profiles, `Connection.cloud`,

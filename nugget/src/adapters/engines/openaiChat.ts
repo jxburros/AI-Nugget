@@ -4,7 +4,7 @@ import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ContentPart, EmbedRequest, EmbedResult, MediaOutput, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
-import { DEFAULT_TIMEOUT_MS, health, listOpenModels, mediaFromUrl, parseArgs, partBase64, partHasBytes, partMime, partUrl, randomId, safeParse, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
+import { DEFAULT_TIMEOUT_MS, health, listOpenModels, mcpUnsupported, mediaFromUrl, promptCacheUnsupported, parseArgs, partBase64, partHasBytes, partMime, partUrl, randomId, safeParse, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
 
 export class OpenAIChatAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -41,6 +41,9 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     let assistantState: Record<string, unknown> | undefined;
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+    if (req.mcpServers?.length) throw mcpUnsupported(conn.provider, 'Chat Completions');
+    if (req.promptCache && !this.profile.quirks?.promptCache) yield promptCacheUnsupported(conn.provider);
+    let cachedTokens: number | undefined;
     try {
       let res: Response;
       try {
@@ -80,6 +83,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         toolCalls = parsed.toolCalls;
         for (const item of parsed.media) { media.push(item); yield { type: 'context', kind: 'media', data: item }; }
         inputTokens = parsed.inputTokens;
+        cachedTokens = parsed.cachedTokens;
         outputTokens = parsed.outputTokens;
         finish = parsed.finish;
         sawTerminal = true;
@@ -96,6 +100,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
           const usage = asRecord(record.usage);
           inputTokens = asNumber(usage?.prompt_tokens) ?? inputTokens;
           outputTokens = asNumber(usage?.completion_tokens) ?? outputTokens;
+          cachedTokens = asNumber(asRecord(usage?.prompt_tokens_details)?.cached_tokens) ?? cachedTokens;
           const choices = Array.isArray(record.choices) ? record.choices : [];
           const choice = asRecord(choices[0]);
           finish = asString(choice?.finish_reason) ?? finish;
@@ -148,6 +153,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
       if (!sawTerminal) yield streamAnomaly('stream ended without a finish_reason');
       const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
       if (media.length) result.media = media;
+      if (cachedTokens !== undefined && !result.usage.estimated) result.usage.cachedInputTokens = cachedTokens;
       if (this.profile.quirks?.preserveAssistantState) {
         result.providerState = { provider: conn.provider, model: req.model, protocol: 'chat-completions', content: [assistantState ?? {
           role: 'assistant', content: text,
@@ -217,7 +223,7 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile, provider: string
     top_p: req.topP,
     stop: req.stopSequences,
     response_format: responseFormatFor(req, profile),
-    tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
+    tools: req.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
     tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
     stream: true,
     // Many OpenAI-compatible local servers (llama.cpp, LM Studio, vLLM) choke
@@ -232,6 +238,7 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile, provider: string
   // providerOptions carries OpenAI-native fields the nugget doesn't model
   // (`reasoning_effort`, `parallel_tool_calls`, `seed`, `logprobs`, …). `apiVersion`
   // is consumed by urlFor for Azure and stripped here so it never hits the body.
+  if (req.promptCache && profile.quirks?.promptCache) Object.assign(body, openAiPromptCache(req));
   const { apiVersion, ...passthrough } = req.providerOptions ?? {};
   void apiVersion;
   return applyProviderOptions(body, Object.keys(passthrough).length ? passthrough : undefined);
@@ -319,7 +326,7 @@ function imagesFrom(value: unknown): MediaOutput[] {
     .map((url) => mediaFromUrl('image', url, 'image/png'));
 }
 
-function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; toolCalls: ToolCall[]; media: MediaOutput[]; inputTokens?: number; outputTokens?: number; finish?: string } {
+function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; toolCalls: ToolCall[]; media: MediaOutput[]; inputTokens?: number; outputTokens?: number; cachedTokens?: number; finish?: string } {
   const record = asRecord(raw);
   const usage = asRecord(record?.usage);
   const choice = asRecord(Array.isArray(record?.choices) ? record.choices[0] : undefined);
@@ -347,6 +354,7 @@ function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; 
     }),
     inputTokens: asNumber(usage?.prompt_tokens),
     outputTokens: asNumber(usage?.completion_tokens),
+    cachedTokens: asNumber(asRecord(usage?.prompt_tokens_details)?.cached_tokens),
   };
 }
 
@@ -388,4 +396,28 @@ export function shouldRetryWithoutReasoningEffort(error: unknown, req: ChatReque
   if (effective === 'none') return false;
   const text = `${error.raw ?? ''} ${error.message}`.toLowerCase();
   return text.includes('reasoning_effort') && text.includes('tool');
+}
+
+/**
+ * OpenAI-family prompt-cache fields. `extended` asks for the longer lifetime:
+ * `prompt_cache_options.ttl: '12h'` on the Responses API for GPT-5.6+, and
+ * `prompt_cache_retention: '24h'` everywhere else.
+ */
+export function openAiPromptCache(req: ChatRequest, responsesApi = false): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (req.promptCache?.key) out.prompt_cache_key = req.promptCache.key;
+  if (req.promptCache?.retention === 'extended') {
+    if (responsesApi && newCacheModel(req.model)) out.prompt_cache_options = { ttl: '12h' };
+    else out.prompt_cache_retention = '24h';
+  }
+  return out;
+}
+
+/** GPT-5.6 and later use `prompt_cache_options` instead of `prompt_cache_retention`. */
+function newCacheModel(model: string): boolean {
+  const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(model);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? 0);
+  return major > 5 || (major === 5 && minor >= 6);
 }

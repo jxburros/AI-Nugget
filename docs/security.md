@@ -165,6 +165,27 @@ the cheap, correct move.
 Anything with a side effect (writes, sends, payments, deletes) should *also*
 carry `sideEffects: true` so the approval gate covers it.
 
+## Provider-hosted MCP servers
+
+`ChatRequest.mcpServers` hands remote MCP servers to the provider (Anthropic MCP
+connector, Responses `mcp` tools), which then calls them with the model —
+outside your process and outside the agent loop's approval gate. Treat each
+server like a tool with side effects:
+
+- **Tokens go through `KeySource`.** `authorization` is a `KeyRef`, resolved
+  after the `beforeCall` hook and registered for redaction, so it never reaches
+  hooks, telemetry or error messages. Do not put tokens in `providerOptions`.
+- **Govern URLs.** `GovernancePolicy.checkMcpServer(provider, { name, url })`
+  runs for every server; `mcpServerAllowlistPolicy(['https://mcp.example.com/'])`
+  is a ready-made prefix allowlist (compose it with your model policy). Without
+  one, every `https://` server is allowed — the library's usual neutral default.
+  Non-`https` URLs are always rejected.
+- **Limit tools.** `allowedTools` restricts the server's tools. On Responses,
+  OpenAI pauses for approval by default; pass `requireApproval: 'never'` only
+  for servers you trust, since approval round-trips are not modeled.
+- Provider-executed calls surface as `mcp_tool_use`/`mcp_tool_result` context
+  events (Anthropic) or `provider_output` items (Responses).
+
 ## Governance is neutral by default
 
 With no `policy` configured, `allowAllPolicy()` is used — every provider and

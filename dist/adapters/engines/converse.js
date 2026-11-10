@@ -1,7 +1,7 @@
 import { AIError } from '../../errors.js';
 import { postResponse } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl } from '../../util.js';
-import { partBase64, partHasBytes, partMime, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
+import { mcpUnsupported, partBase64, promptCacheUnsupported, partHasBytes, partMime, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
 import { awsEvents } from './awsEventStream.js';
 /** Bedrock native Converse/ConverseStream, distinct from its compatible APIs. */
 export class ConverseAdapter {
@@ -29,6 +29,10 @@ export class ConverseAdapter {
         const redactedByIndex = new Map();
         const buffered = req.providerOptions?.stream === false;
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw mcpUnsupported(conn.provider, 'Converse');
+        if (req.promptCache)
+            yield promptCacheUnsupported(conn.provider);
         try {
             const response = await postResponse(joinUrl(conn.baseUrl, `/model/${encodeURIComponent(req.model)}/${buffered ? 'converse' : 'converse-stream'}`), converseBody(conn, req), conn.headers, timeout.signal, conn.provider, conn.fetch);
             if (buffered) {
@@ -130,7 +134,7 @@ export class ConverseAdapter {
                     text, toolCalls: toolCalls.length ? toolCalls : undefined,
                     providerState: { provider: conn.provider, model: req.model, protocol: 'converse', content },
                     finishReason: stop === 'max_tokens' ? 'length' : stop === 'guardrail_intervened' || stop === 'content_filtered' ? 'content_filter' : toolCalls.length ? 'tool' : 'stop',
-                    usage: { inputTokens: asNumber(usage?.inputTokens), outputTokens: asNumber(usage?.outputTokens), estimated: !usage },
+                    usage: converseUsage(usage),
                     timing: { firstTokenMs, totalMs: Date.now() - started }, model: req.model,
                     source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
                 } };
@@ -226,5 +230,18 @@ function converseFormat(mime) {
     if (sub === 'x-matroska')
         return 'mkv';
     return sub;
+}
+/** Converse `inputTokens` excludes cache reads/writes; report the total, with the split alongside. */
+function converseUsage(usage) {
+    const input = asNumber(usage?.inputTokens);
+    const read = asNumber(usage?.cacheReadInputTokens);
+    const write = asNumber(usage?.cacheWriteInputTokens);
+    return {
+        inputTokens: input === undefined ? undefined : input + (read ?? 0) + (write ?? 0),
+        outputTokens: asNumber(usage?.outputTokens),
+        ...(read !== undefined ? { cachedInputTokens: read } : {}),
+        ...(write !== undefined ? { cacheWriteTokens: write } : {}),
+        estimated: !usage,
+    };
 }
 //# sourceMappingURL=converse.js.map

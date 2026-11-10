@@ -20,8 +20,10 @@ class ResponsesAdapter extends openaiChat_js_1.OpenAIChatAdapter {
         let text = '';
         let response;
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.promptCache && !this.responsesProfile.quirks?.promptCache)
+            yield (0, base_js_1.promptCacheUnsupported)(conn.provider);
         try {
-            const body = responsesBody(conn, req);
+            const body = responsesBody(conn, req, this.responsesProfile.quirks?.promptCache === true);
             if (this.responsesProfile.quirks?.responsesStreaming === false) {
                 body.stream = false;
                 yield { type: 'context', kind: 'buffered_response', data: { reason: 'This provider only supports buffered Responses requests.' } };
@@ -41,17 +43,21 @@ class ResponsesAdapter extends openaiChat_js_1.OpenAIChatAdapter {
                             yield { type: 'delta', text: delta };
                         }
                     }
-                    else if (event.type === 'response.reasoning_summary_text.delta') {
+                    else if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_text.delta') {
                         yield { type: 'reasoning', text: (0, util_js_1.asString)(event.delta) ?? '' };
                     }
                     else if (event.type === 'response.function_call_arguments.delta') {
                         yield { type: 'context', kind: 'tool_arguments_delta', data: { itemId: event.item_id, delta: event.delta } };
                     }
                     else if (event.type === 'error' || event.type === 'response.failed') {
-                        throw invalid((0, util_js_1.asString)((0, util_js_1.asRecord)(event.error)?.message) ?? (0, util_js_1.asString)((0, util_js_1.asRecord)((0, util_js_1.asRecord)(event.response)?.error)?.message) ?? 'Responses request failed', conn);
+                        throw responseFailure((0, util_js_1.asRecord)(event.error) ?? (0, util_js_1.asRecord)((0, util_js_1.asRecord)(event.response)?.error), conn);
                     }
                     else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
                         response = (0, util_js_1.asRecord)(event.response);
+                    }
+                    else if (typeof event.type === 'string' && event.type.includes(':')) {
+                        // Open Responses extension events are `slug:name`; surface, never drop.
+                        yield { type: 'context', kind: 'provider_event', data: event };
                     }
                 }
                 if (!response)
@@ -62,6 +68,8 @@ class ResponsesAdapter extends openaiChat_js_1.OpenAIChatAdapter {
             }
             if (!response || !Array.isArray(response.output))
                 throw invalid('Responses result has no output array', conn);
+            if (response.status === 'failed')
+                throw responseFailure((0, util_js_1.asRecord)(response.error), conn);
             if (response.status !== 'completed' && response.status !== 'incomplete')
                 throw invalid(`Responses request did not complete (${String(response.status)})`, conn);
             const output = response.output.map(util_js_1.asRecord).filter((item) => !!item);
@@ -111,6 +119,9 @@ class ResponsesAdapter extends openaiChat_js_1.OpenAIChatAdapter {
             const usage = (0, util_js_1.asRecord)(response.usage);
             const inputTokens = (0, util_js_1.asNumber)(usage?.input_tokens);
             const outputTokens = (0, util_js_1.asNumber)(usage?.output_tokens);
+            const inputDetails = (0, util_js_1.asRecord)(usage?.input_tokens_details);
+            const cachedInputTokens = (0, util_js_1.asNumber)(inputDetails?.cached_tokens);
+            const cacheWriteTokens = (0, util_js_1.asNumber)(inputDetails?.cache_write_tokens);
             const result = {
                 text: finalText || text,
                 ...(media.length ? { media } : {}),
@@ -119,7 +130,12 @@ class ResponsesAdapter extends openaiChat_js_1.OpenAIChatAdapter {
                 finishReason: response.status === 'incomplete'
                     ? (0, util_js_1.asRecord)(response.incomplete_details)?.reason === 'content_filter' ? 'content_filter' : 'length'
                     : toolCalls.length ? 'tool' : refused ? 'content_filter' : 'stop',
-                usage: { inputTokens, outputTokens, estimated: inputTokens === undefined && outputTokens === undefined },
+                usage: {
+                    inputTokens, outputTokens,
+                    ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+                    ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+                    estimated: inputTokens === undefined && outputTokens === undefined,
+                },
                 timing: { firstTokenMs, totalMs: Date.now() - started },
                 model: req.model,
                 source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
@@ -138,7 +154,37 @@ exports.ResponsesAdapter = ResponsesAdapter;
 function invalid(message, conn) {
     return new errors_js_1.AIError(message, { kind: 'invalid_response', retryable: false, provider: conn.provider });
 }
-function responsesBody(conn, req) {
+/**
+ * Typed failure for `error` / `response.failed`. Open Responses error types
+ * (`too_many_requests`, `server_error`, `model_error`, `invalid_request`,
+ * `not_found`) map onto their HTTP status so retryability matches a plain
+ * HTTP failure; unknown types stay `invalid_response`.
+ */
+function responseFailure(error, conn) {
+    const statuses = {
+        too_many_requests: 429, rate_limit_exceeded: 429, server_error: 500, model_error: 500,
+        invalid_request: 400, invalid_request_error: 400, not_found: 404, context_length_exceeded: 400,
+    };
+    const status = statuses[(0, util_js_1.asString)(error?.type) ?? ''] ?? statuses[(0, util_js_1.asString)(error?.code) ?? ''];
+    if (status !== undefined)
+        return (0, errors_js_1.classify)(status, JSON.stringify(error), conn.provider);
+    return invalid((0, util_js_1.asString)(error?.message) ?? 'Responses request failed', conn);
+}
+/** Responses `mcp` tool entries for provider-hosted MCP servers. */
+function mcpTools(req) {
+    return (req.mcpServers ?? []).map((server) => {
+        const token = (0, util_js_1.mcpToken)(server);
+        return {
+            type: 'mcp',
+            server_label: server.name,
+            server_url: server.url,
+            ...(token ? { authorization: token } : {}),
+            ...(server.allowedTools ? { allowed_tools: server.allowedTools } : {}),
+            ...(server.requireApproval ? { require_approval: server.requireApproval } : {}),
+        };
+    });
+}
+function responsesBody(conn, req, promptCache = false) {
     if (req.stopSequences?.length)
         throw new errors_js_1.AIError('Responses does not support stopSequences', { kind: 'invalid_request', retryable: false, provider: conn.provider });
     const input = [];
@@ -162,7 +208,8 @@ function responsesBody(conn, req) {
         model: req.model, input, stream: true, store: false,
         max_output_tokens: req.maxTokens, temperature: req.temperature, top_p: req.topP,
         reasoning: req.reasoningEffort === undefined ? undefined : { effort: req.reasoningEffort },
-        tools: req.tools?.map(tool => ({ type: 'function', ...tool })),
+        tools: req.tools?.length || req.mcpServers?.length ? [...(req.tools ?? []).map(tool => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters })), ...mcpTools(req)] : undefined,
+        ...(promptCache && req.promptCache ? (0, openaiChat_js_1.openAiPromptCache)(req, true) : {}),
         tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', name: req.toolChoice.name } : req.toolChoice,
         text: req.responseFormat?.type === 'json' ? { format: req.responseFormat.schema
                 ? { type: 'json_schema', name: 'response', schema: req.responseFormat.schema, strict: true }

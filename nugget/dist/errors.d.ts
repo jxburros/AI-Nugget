@@ -1,4 +1,4 @@
-import type { AIErrorKind } from './types.js';
+import type { AIErrorKind, RateLimitInfo } from './types.js';
 export declare class AIError extends Error {
     kind: AIErrorKind;
     status?: number;
@@ -6,6 +6,8 @@ export declare class AIError extends Error {
     provider?: string;
     raw?: string;
     retryAfterMs?: number;
+    /** Rate-limit headers the provider sent with this failure, normalized. */
+    rateLimit?: RateLimitInfo;
     constructor(message: string, opts: {
         kind: AIErrorKind;
         status?: number;
@@ -13,6 +15,7 @@ export declare class AIError extends Error {
         provider?: string;
         raw?: string;
         retryAfterMs?: number;
+        rateLimit?: RateLimitInfo;
         cause?: unknown;
     });
 }

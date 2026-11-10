@@ -2,7 +2,7 @@
 
 <img src="assets/ai-nugget-logo.png" alt="AI Nugget official logo" width="180" />
 
-**Version 0.7.5** · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
+**Version 0.8.0** · [What's new in 0.8.0](#whats-new-in-080) · [What's changed in 0.7.x](#whats-changed-in-07x) · [Changelog](./CHANGELOG.md) · [Upgrading](./UPGRADING.md)
 
 A small, zero-dependency, isomorphic TypeScript nugget for talking to AI model
 providers through one pipeline:
@@ -11,15 +11,44 @@ providers through one pipeline:
 policy → key resolution → beforeCall hook → concurrency/retry → provider adapter → redacted telemetry
 ```
 
-32 provider profiles over 6 protocol engines. Runs identically in Node, the
+33 provider profiles over 6 protocol engines. Runs identically in Node, the
 browser main thread, and Web Workers using only `fetch`, `ReadableStream`,
 `AbortController`, and `TextDecoder`. MIT licensed.
 
 It is intentionally **not** a router, prompt library, memory system, or secrets
 vault: apps choose models, own prompts, store secrets, and decide policy.
 
-## Unreleased: Meta Muse, multimodal parts, deeper reasoning tiers
+> [!IMPORTANT]
+> **Perplexity users: 0.8.0 changes the `perplexity` endpoint.** Perplexity ended
+> Sonar Chat Completions support on 2026-09-27, so the `perplexity` profile now
+> targets the Orchestrator API (`https://api.perplexity.ai/orchestrator/v1`),
+> which takes catalog model IDs such as `perplexity/sonar` instead of `sonar`.
+> **Before you update,** either switch your model IDs, or pin the old endpoint
+> with `baseUrl: 'https://api.perplexity.ai'` on the connection. Details in
+> [UPGRADING](./UPGRADING.md#075--080).
 
+## What's new in 0.8.0
+
+- **Perplexity endpoint change** — see the notice above.
+- **Prompt caching** — `promptCache: { key, retention }` on any request, mapped
+  to Anthropic automatic caching and OpenAI-family cache keys/retention;
+  `usage.cachedInputTokens` / `cacheWriteTokens` everywhere the provider reports
+  them ([docs](docs/reliability.md#prompt-caching)).
+- **Rate-limit headers** — IETF `RateLimit`/`RateLimit-Policy` plus OpenAI- and
+  Anthropic-style headers are parsed onto `result.rateLimit`, `error.rateLimit`
+  and telemetry, and drive 429 backoff ([docs](docs/reliability.md#rate-limit-headers)).
+- **Standard JSON Schema** — `chatParsed` and `defineTool({ input })` take a
+  Zod 4.2+/Valibot schema and derive the provider schema from it
+  ([docs](docs/agent-loop.md#argument-validation)).
+- **Open Responses** — an `open-responses` profile for any server implementing
+  the spec; typed `response.failed` errors and extension events
+  ([docs](docs/providers.md#open-responses)).
+- **Hosted MCP connectors** — `mcpServers` lets Anthropic and Responses
+  providers call remote MCP servers, with tokens from your `KeySource` and a
+  `checkMcpServer` policy hook ([docs](docs/security.md#provider-hosted-mcp-servers)).
+- **`usage.inputTokens` now always includes cached prompt tokens.** Anthropic
+  and Bedrock Converse used to report only the uncached remainder; check any
+  pricing hook that bills cache tokens separately ([UPGRADING](./UPGRADING.md#075--080)).
 - New `meta` (Meta Model API / Muse) and `vercel` (Vercel AI Gateway) profiles;
   `moonshot`, `deepseek`, `together`, `fireworks`, `groq` and `minimax` profiles
   refreshed against current provider docs ([provider notes](docs/providers.md#provider-notes-checked-against-official-docs-2026-11-10)).

@@ -52,6 +52,8 @@ async function* run(opts, resolveResult) {
                 stopSequences: opts.stopSequences,
                 reasoningEffort: opts.reasoningEffort,
                 providerOptions: opts.providerOptions,
+                promptCache: opts.promptCache,
+                mcpServers: opts.mcpServers,
                 signal: agentSignal.signal,
                 metadata: { ...opts.metadata, agentStep: step },
             })) {
@@ -101,7 +103,7 @@ async function* run(opts, resolveResult) {
                     yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
                     continue;
                 }
-                const validation = (0, tools_js_1.validateToolArgs)(tool, call);
+                const validation = await (0, tools_js_1.validateToolInput)(tool, call);
                 if (!validation.ok) {
                     yield* appendToolError(opts, messages, step, call, validation.message);
                     continue;
@@ -121,7 +123,7 @@ async function* run(opts, resolveResult) {
                         continue;
                     }
                     if (approval !== 'allow') {
-                        const modified = (0, tools_js_1.validateToolArgs)(tool, { ...call, arguments: approval.modifiedArguments });
+                        const modified = await (0, tools_js_1.validateToolInput)(tool, { ...call, arguments: approval.modifiedArguments });
                         if (!modified.ok) {
                             yield* appendToolError(opts, messages, step, call, modified.message);
                             continue;

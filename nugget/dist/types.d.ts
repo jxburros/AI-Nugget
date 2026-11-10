@@ -109,6 +109,57 @@ export interface ChatRequest {
      * nugget's own fields on a key collision, so use with care.
      */
     providerOptions?: Record<string, unknown>;
+    /**
+     * Portable prompt-cache controls. `key` groups requests that share a prefix
+     * (OpenAI-family `prompt_cache_key`); `retention: 'extended'` asks for the
+     * provider's longer cache lifetime (Anthropic `ttl: '1h'`, OpenAI 24h/12h).
+     * Anthropic turns on automatic caching whenever this is set. Providers with
+     * no request-level control emit a `prompt_cache_unsupported` context event.
+     */
+    promptCache?: {
+        key?: string;
+        retention?: 'default' | 'extended';
+    };
+    /**
+     * Remote MCP servers the *provider* connects to and calls on the model's
+     * behalf (Anthropic MCP connector, Responses `mcp` tools). Tokens enter
+     * through `KeySource` like API keys; `GovernancePolicy.checkMcpServer` can
+     * allow or deny each URL. Other engines fail with `invalid_request`.
+     */
+    mcpServers?: McpServer[];
+}
+/** A provider-hosted MCP server connection — see {@link ChatRequest.mcpServers}. */
+export interface McpServer {
+    /** Unique label for this server within the request. */
+    name: string;
+    /** Public `https://` URL of the MCP server (Streamable HTTP or SSE). */
+    url: string;
+    /** OAuth/bearer token for the server, resolved through the handler's `KeySource`. */
+    authorization?: KeyRef;
+    /** Restrict which of the server's tools the model may call. */
+    allowedTools?: string[];
+    /** Responses only: whether the provider pauses for approval before each call (provider default: `always`). */
+    requireApproval?: 'always' | 'never';
+}
+/** Rate-limit state reported by a provider's response headers, normalized. */
+export interface RateLimitInfo {
+    /** Requests remaining in the current window. */
+    remainingRequests?: number;
+    /** Tokens remaining in the current window. */
+    remainingTokens?: number;
+    limitRequests?: number;
+    limitTokens?: number;
+    /** Milliseconds until the exhausted (or soonest) quota resets. */
+    resetMs?: number;
+    /** IETF `RateLimit` / `RateLimit-Policy` entries, when the provider sends them. */
+    policies?: Array<{
+        name: string;
+        remaining: number;
+        resetSeconds?: number;
+        quota?: number;
+        windowSeconds?: number;
+        unit?: string;
+    }>;
 }
 export interface Connection {
     id: string;
@@ -181,12 +232,19 @@ export interface ResolvedConnection extends Connection {
     fetch?: typeof fetch;
 }
 export interface Usage {
+    /** All prompt tokens, including any read from or written to a prompt cache. */
     inputTokens?: number;
     outputTokens?: number;
+    /** Prompt tokens served from the provider's cache (a subset of `inputTokens`). */
+    cachedInputTokens?: number;
+    /** Prompt tokens written to the provider's cache on this call (a subset of `inputTokens`). */
+    cacheWriteTokens?: number;
     estimated: boolean;
 }
 export interface ChatResult {
     text: string;
+    /** Provider rate-limit headers from the final attempt, normalized. */
+    rateLimit?: RateLimitInfo;
     /** Images/audio the model generated in-band (Gemini image output, chat audio, Responses image generation). */
     media?: MediaOutput[];
     providerState?: ProviderState;
@@ -281,6 +339,20 @@ export interface GovernancePolicy {
         allowed: false;
         reason: string;
     };
+    /**
+     * Optional: decide whether a request may hand the provider this remote MCP
+     * server (see {@link ChatRequest.mcpServers}). Omitted means allowed, like
+     * every other library default — configure it if MCP servers come from users.
+     */
+    checkMcpServer?(provider: string, server: {
+        name: string;
+        url: string;
+    }): {
+        allowed: true;
+    } | {
+        allowed: false;
+        reason: string;
+    };
 }
 export interface Redactor {
     redact(text: string): string;
@@ -322,6 +394,8 @@ export interface CallRecord {
     metadata?: Record<string, unknown>;
     promptChars: number;
     responseChars: number;
+    /** Provider rate-limit headers from the last attempt (success or failure). */
+    rateLimit?: RateLimitInfo;
     /**
      * Estimated cost of this call in USD, computed by the optional `pricing` hook
      * passed to the handler. Undefined when no pricing hook is configured or the
@@ -340,7 +414,24 @@ export interface StandardSchemaV1<Output = unknown> {
         readonly version: 1;
         readonly vendor: string;
         readonly validate: (value: unknown) => StandardSchemaResult<Output> | Promise<StandardSchemaResult<Output>>;
+        /**
+         * [Standard JSON Schema](https://standardschema.dev/json-schema) converter
+         * (Zod 4.2+, Valibot, …). When present, the nugget derives provider JSON
+         * schemas from the validator itself — no converter dependency.
+         */
+        readonly jsonSchema?: StandardJSONSchemaConverter;
     };
+}
+/** The `~standard.jsonSchema` converter from the Standard JSON Schema spec. */
+export interface StandardJSONSchemaConverter {
+    readonly input: (options: {
+        readonly target: string;
+        readonly libraryOptions?: Record<string, unknown>;
+    }) => Record<string, unknown>;
+    readonly output: (options: {
+        readonly target: string;
+        readonly libraryOptions?: Record<string, unknown>;
+    }) => Record<string, unknown>;
 }
 export type StandardSchemaResult<Output> = {
     readonly value: Output;

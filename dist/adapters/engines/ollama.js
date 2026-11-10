@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, ndjsonLines, postResponse } from '../../transport.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, mapWithConcurrency, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, parseArgs, partBase64, partHasBytes, randomId, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
+import { DEFAULT_TIMEOUT_MS, mcpUnsupported, parseArgs, promptCacheUnsupported, partBase64, partHasBytes, randomId, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
 /** Max concurrent /api/show probes when listing models — enough to be fast, few enough to be polite to a local daemon. */
 const SHOW_CONCURRENCY = 6;
 export class OllamaAdapter {
@@ -33,6 +33,10 @@ export class OllamaAdapter {
         const toolCalls = [];
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw mcpUnsupported(conn.provider, 'chat');
+        if (req.promptCache)
+            yield promptCacheUnsupported(conn.provider);
         try {
             const res = await postResponse(joinUrl(conn.baseUrl, '/api/chat'), body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
             for await (const value of ndjsonLines(res)) {

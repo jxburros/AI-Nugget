@@ -3,10 +3,10 @@ import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import type { AIHandler } from '../handler.js';
-import type { AIErrorKind, ProviderState, ChatMessage, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
+import type { AIErrorKind, ProviderState, ChatMessage, ChatRequest, Connection, ReasoningEffort, StreamEvent, ToolCall, Usage } from '../types.js';
 import { asRecord, sleep } from '../util.js';
 import type { ToolSpec } from './tools.js';
-import { validateToolArgs } from './tools.js';
+import { validateToolInput } from './tools.js';
 
 export interface AgentOptions {
   handler: AIHandler;
@@ -41,6 +41,10 @@ export interface AgentOptions {
   reasoningEffort?: ReasoningEffort;
   /** Provider-native passthrough forwarded to every turn — see {@link ChatRequest.providerOptions}. */
   providerOptions?: Record<string, unknown>;
+  /** Prompt-cache controls forwarded to every turn — see {@link ChatRequest.promptCache}. */
+  promptCache?: ChatRequest['promptCache'];
+  /** Provider-hosted MCP servers forwarded to every turn — see {@link ChatRequest.mcpServers}. */
+  mcpServers?: ChatRequest['mcpServers'];
   budget?: {
     maxSteps?: number;
     maxTokens?: number;
@@ -144,6 +148,8 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
         stopSequences: opts.stopSequences,
         reasoningEffort: opts.reasoningEffort,
         providerOptions: opts.providerOptions,
+        promptCache: opts.promptCache,
+        mcpServers: opts.mcpServers,
         signal: agentSignal.signal,
         metadata: { ...opts.metadata, agentStep: step },
       })) {
@@ -188,7 +194,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
           yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
           continue;
         }
-        const validation = validateToolArgs(tool, call);
+        const validation = await validateToolInput(tool, call);
         if (!validation.ok) {
           yield* appendToolError(opts, messages, step, call, validation.message);
           continue;
@@ -207,7 +213,7 @@ async function* run(opts: AgentOptions, resolveResult: (result: AgentResult) => 
             continue;
           }
           if (approval !== 'allow') {
-            const modified = validateToolArgs(tool, { ...call, arguments: approval.modifiedArguments });
+            const modified = await validateToolInput(tool, { ...call, arguments: approval.modifiedArguments });
             if (!modified.ok) {
               yield* appendToolError(opts, messages, step, call, modified.message);
               continue;

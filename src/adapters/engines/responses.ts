@@ -1,9 +1,9 @@
-import { AIError } from '../../errors.js';
+import { AIError, classify } from '../../errors.js';
 import { postResponse, sseLines } from '../../transport.js';
 import type { ChatRequest, ChatResult, ContentPart, MediaOutput, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
-import { applyProviderOptions, asNumber, asRecord, asString, joinUrl } from '../../util.js';
-import { OpenAIChatAdapter } from './openaiChat.js';
-import { partHasBytes, partUrl, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
+import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, mcpToken } from '../../util.js';
+import { OpenAIChatAdapter, openAiPromptCache } from './openaiChat.js';
+import { partHasBytes, partUrl, promptCacheUnsupported, safeParse, streamError, streamTimeout, unsupportedPart } from './base.js';
 import type { ProviderProfile } from '../profiles.js';
 
 /** Responses wire format shared by compatible providers. Explicit opt-in only. */
@@ -17,8 +17,9 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
     let text = '';
     let response: Record<string, unknown> | undefined;
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+    if (req.promptCache && !this.responsesProfile.quirks?.promptCache) yield promptCacheUnsupported(conn.provider);
     try {
-      const body = responsesBody(conn, req);
+      const body = responsesBody(conn, req, this.responsesProfile.quirks?.promptCache === true);
       if (this.responsesProfile.quirks?.responsesStreaming === false) {
         body.stream = false;
         yield { type: 'context', kind: 'buffered_response', data: { reason: 'This provider only supports buffered Responses requests.' } };
@@ -36,14 +37,17 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
               firstTokenMs ??= Date.now() - started;
               yield { type: 'delta', text: delta };
             }
-          } else if (event.type === 'response.reasoning_summary_text.delta') {
+          } else if (event.type === 'response.reasoning_summary_text.delta' || event.type === 'response.reasoning_text.delta') {
             yield { type: 'reasoning', text: asString(event.delta) ?? '' };
           } else if (event.type === 'response.function_call_arguments.delta') {
             yield { type: 'context', kind: 'tool_arguments_delta', data: { itemId: event.item_id, delta: event.delta } };
           } else if (event.type === 'error' || event.type === 'response.failed') {
-            throw invalid(asString(asRecord(event.error)?.message) ?? asString(asRecord(asRecord(event.response)?.error)?.message) ?? 'Responses request failed', conn);
+            throw responseFailure(asRecord(event.error) ?? asRecord(asRecord(event.response)?.error), conn);
           } else if (event.type === 'response.completed' || event.type === 'response.incomplete') {
             response = asRecord(event.response);
+          } else if (typeof event.type === 'string' && event.type.includes(':')) {
+            // Open Responses extension events are `slug:name`; surface, never drop.
+            yield { type: 'context', kind: 'provider_event', data: event };
           }
         }
         if (!response) throw invalid('Responses stream ended without a terminal response', conn);
@@ -51,6 +55,7 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
         response = asRecord(safeParse(await res.text()));
       }
       if (!response || !Array.isArray(response.output)) throw invalid('Responses result has no output array', conn);
+      if (response.status === 'failed') throw responseFailure(asRecord(response.error), conn);
       if (response.status !== 'completed' && response.status !== 'incomplete') throw invalid(`Responses request did not complete (${String(response.status)})`, conn);
       const output = response.output.map(asRecord).filter((item): item is Record<string, unknown> => !!item);
       const toolCalls: ToolCall[] = [];
@@ -92,6 +97,9 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
       const usage = asRecord(response.usage);
       const inputTokens = asNumber(usage?.input_tokens);
       const outputTokens = asNumber(usage?.output_tokens);
+      const inputDetails = asRecord(usage?.input_tokens_details);
+      const cachedInputTokens = asNumber(inputDetails?.cached_tokens);
+      const cacheWriteTokens = asNumber(inputDetails?.cache_write_tokens);
       const result: ChatResult = {
         text: finalText || text,
         ...(media.length ? { media } : {}),
@@ -100,7 +108,12 @@ export class ResponsesAdapter extends OpenAIChatAdapter {
         finishReason: response.status === 'incomplete'
           ? asRecord(response.incomplete_details)?.reason === 'content_filter' ? 'content_filter' : 'length'
           : toolCalls.length ? 'tool' : refused ? 'content_filter' : 'stop',
-        usage: { inputTokens, outputTokens, estimated: inputTokens === undefined && outputTokens === undefined },
+        usage: {
+          inputTokens, outputTokens,
+          ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}),
+          ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+          estimated: inputTokens === undefined && outputTokens === undefined,
+        },
         timing: { firstTokenMs, totalMs: Date.now() - started },
         model: req.model,
         source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
@@ -116,7 +129,38 @@ function invalid(message: string, conn: ResolvedConnection): AIError {
   return new AIError(message, { kind: 'invalid_response', retryable: false, provider: conn.provider });
 }
 
-function responsesBody(conn: ResolvedConnection, req: ChatRequest): Record<string, unknown> {
+/**
+ * Typed failure for `error` / `response.failed`. Open Responses error types
+ * (`too_many_requests`, `server_error`, `model_error`, `invalid_request`,
+ * `not_found`) map onto their HTTP status so retryability matches a plain
+ * HTTP failure; unknown types stay `invalid_response`.
+ */
+function responseFailure(error: Record<string, unknown> | undefined, conn: ResolvedConnection): AIError {
+  const statuses: Record<string, number> = {
+    too_many_requests: 429, rate_limit_exceeded: 429, server_error: 500, model_error: 500,
+    invalid_request: 400, invalid_request_error: 400, not_found: 404, context_length_exceeded: 400,
+  };
+  const status = statuses[asString(error?.type) ?? ''] ?? statuses[asString(error?.code) ?? ''];
+  if (status !== undefined) return classify(status, JSON.stringify(error), conn.provider);
+  return invalid(asString(error?.message) ?? 'Responses request failed', conn);
+}
+
+/** Responses `mcp` tool entries for provider-hosted MCP servers. */
+function mcpTools(req: ChatRequest): Record<string, unknown>[] {
+  return (req.mcpServers ?? []).map((server) => {
+    const token = mcpToken(server);
+    return {
+      type: 'mcp',
+      server_label: server.name,
+      server_url: server.url,
+      ...(token ? { authorization: token } : {}),
+      ...(server.allowedTools ? { allowed_tools: server.allowedTools } : {}),
+      ...(server.requireApproval ? { require_approval: server.requireApproval } : {}),
+    };
+  });
+}
+
+function responsesBody(conn: ResolvedConnection, req: ChatRequest, promptCache = false): Record<string, unknown> {
   if (req.stopSequences?.length) throw new AIError('Responses does not support stopSequences', { kind: 'invalid_request', retryable: false, provider: conn.provider });
   const input: Record<string, unknown>[] = [];
   for (const message of req.messages) {
@@ -138,7 +182,8 @@ function responsesBody(conn: ResolvedConnection, req: ChatRequest): Record<strin
     model: req.model, input, stream: true, store: false,
     max_output_tokens: req.maxTokens, temperature: req.temperature, top_p: req.topP,
     reasoning: req.reasoningEffort === undefined ? undefined : { effort: req.reasoningEffort },
-    tools: req.tools?.map(tool => ({ type: 'function', ...tool })),
+    tools: req.tools?.length || req.mcpServers?.length ? [...(req.tools ?? []).map(tool => ({ type: 'function', name: tool.name, description: tool.description, parameters: tool.parameters })), ...mcpTools(req)] : undefined,
+    ...(promptCache && req.promptCache ? openAiPromptCache(req, true) : {}),
     tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', name: req.toolChoice.name } : req.toolChoice,
     text: req.responseFormat?.type === 'json' ? { format: req.responseFormat.schema
       ? { type: 'json_schema', name: 'response', schema: req.responseFormat.schema, strict: true }

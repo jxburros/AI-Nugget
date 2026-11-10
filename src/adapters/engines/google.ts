@@ -3,7 +3,7 @@ import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import type { ChatMessage, ChatRequest, ChatResult, ContentPart, MediaOutput, ModelInfo, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, partBase64, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, mcpUnsupported, partBase64, promptCacheUnsupported, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 
 export class GoogleAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -27,6 +27,7 @@ export class GoogleAdapter implements ProviderAdapter {
     let text = '';
     let inputTokens: number | undefined;
     let outputTokens: number | undefined;
+    let cachedTokens: number | undefined;
     let finish: string | undefined;
     const toolCalls: ToolCall[] = [];
     const media: MediaOutput[] = [];
@@ -35,6 +36,8 @@ export class GoogleAdapter implements ProviderAdapter {
     const modelParts: Record<string, unknown>[] = [];
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+    if (req.mcpServers?.length) throw mcpUnsupported(conn.provider, 'generateContent');
+    if (req.promptCache) yield promptCacheUnsupported(conn.provider);
     // Gemini rejects `responseMimeType: application/json` combined with function
     // declarations, so `body()` drops JSON mode when tools are present. Surface
     // that downgrade instead of silently returning unstructured text.
@@ -94,6 +97,7 @@ export class GoogleAdapter implements ProviderAdapter {
         const usage = asRecord(record?.usageMetadata);
         inputTokens = asNumber(usage?.promptTokenCount) ?? inputTokens;
         outputTokens = asNumber(usage?.candidatesTokenCount) ?? outputTokens;
+        cachedTokens = asNumber(usage?.cachedContentTokenCount) ?? cachedTokens;
       }
       if (!finish) yield streamAnomaly('stream ended without a finishReason');
       const hasTools = toolCalls.length > 0;
@@ -103,7 +107,7 @@ export class GoogleAdapter implements ProviderAdapter {
         providerState: { provider: conn.provider, model: req.model, content: [{ role: 'model', parts: modelParts }] },
         toolCalls: hasTools ? toolCalls : undefined,
         finishReason: mapFinish(finish, hasTools),
-        usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
+        usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, ...(cachedTokens !== undefined ? { cachedInputTokens: cachedTokens } : {}), estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
         timing: { firstTokenMs, totalMs: Date.now() - started },
         model: req.model,
         source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },

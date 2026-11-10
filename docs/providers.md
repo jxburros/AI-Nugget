@@ -38,7 +38,7 @@ column before betting a production integration on a profile.
 | **live-matrix configured** | Configured for `tests/live-smoke.test.ts` against the real endpoint in the scheduled live matrix (`.github/workflows/live-matrix.yml`), gated on a repo secret and explicit `*_SMOKE_MODEL` repository variable | `openai`, `anthropic`, `google`, `openrouter` |
 | **manual smoke available** | Live-smoke-able locally with a running server, but not in CI (needs a reachable local daemon) | `ollama`, `llamacpp`, `lmstudio`, `vllm` |
 | **mock-verified** | Engine behavior covered by the mocked contract suite; the profile's base URL, auth mode, and quirks are believed correct but not continuously checked against the live API | `groq`, `deepseek`, `mistral`, `together`, `fireworks`, `cerebras`, `moonshot`, `meta`, `vercel`, `cohere`, `perplexity` |
-| **configuration-only** | No fixed endpoint to verify — behavior depends entirely on what you point it at | `azure-openai` (deployment-specific URL template), `openai-compat` |
+| **configuration-only** | No fixed endpoint to verify — behavior depends entirely on what you point it at | `azure-openai` (deployment-specific URL template), `openai-compat`, `open-responses` |
 
 The new `minimax`, `zai`, `dashscope`, `huggingface`, `deepinfra`, `sambanova`,
 `nvidia`, `cloudflare`, `bedrock`, `vertex` and `azure-openai-v1` profiles are
@@ -68,11 +68,13 @@ or an available smoke command alone is not evidence of a successful live run.
 - **`groq`, `minimax`** — send `max_completion_tokens` (Groq deprecated
   `max_tokens`; MiniMax's legacy field also counts thinking tokens).
 - **`vercel`** — Vercel AI Gateway at `https://ai-gateway.vercel.sh/v1`.
-- **`perplexity`** — Perplexity ended Sonar Chat Completions support on
-  2026-09-27; the default URL still answers (requests are reformulated as Agent
-  API calls). For new work use `baseUrl: 'https://api.perplexity.ai/orchestrator/v1'`
-  (Chat Completions subset) or `protocol: 'responses'` with
-  `baseUrl: 'https://api.perplexity.ai/v1'` (Agent API).
+- **`perplexity`** — since 0.8.0 the Orchestrator Chat Completions API,
+  `https://api.perplexity.ai/orchestrator/v1` (Perplexity ended Sonar Chat
+  Completions support on 2026-09-27). Model IDs are catalog IDs
+  (`perplexity/sonar`); citations arrive as `url_citation` annotations. Pin
+  `baseUrl: 'https://api.perplexity.ai'` for the pre-0.8 endpoint, or use
+  `protocol: 'responses'` with `baseUrl: 'https://api.perplexity.ai/v1'` for the
+  Agent API. There is no documented Orchestrator model listing.
 
 If a mock-verified provider drifts (a renamed base path, a new required header),
 the mocked suite will still pass. Report it as a bug with the provider name and
@@ -245,6 +247,29 @@ Completions audio output (MIME from `providerOptions.audio.format`; the spoken
 text is the `transcript`), and Responses `image_generation_call` results.
 Telemetry records never include media bytes. Dedicated image/speech/transcription
 endpoints remain out of scope (see the [optional operations plan](plans/optional-operations.md)).
+
+## Open Responses
+
+[Open Responses](https://www.openresponses.org/) is a vendor-neutral
+specification of the Responses API (items, streaming events, tools). The
+`open-responses` profile targets any server that implements it — it uses the
+`responses` engine without setting `protocol`, posts to `{baseUrl}/responses`,
+needs no key unless the server does, and keeps conservative local-runtime
+capabilities:
+
+```ts
+const local = { id: 'local', provider: 'open-responses', baseUrl: 'http://localhost:11434/v1' };
+```
+
+The engine follows the spec's streaming contract: `[DONE]` is optional,
+`response.completed`/`response.incomplete` are terminal, and `response.failed`
+(or an `error` event) becomes a typed `AIError` from its `type`/`code` —
+`too_many_requests` is a retryable `rate_limit`, `server_error`/`model_error`
+are retryable `server`, `invalid_request` and `not_found` are not retryable.
+Extension events named `slug:name` are surfaced as
+`{ type: 'context', kind: 'provider_event' }`; extension output items arrive as
+`provider_output`. The WebSocket transport and `/responses/compact` are not
+implemented.
 
 ## Stream anomalies
 

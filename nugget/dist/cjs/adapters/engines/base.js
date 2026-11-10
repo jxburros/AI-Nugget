@@ -15,6 +15,8 @@ exports.partUrl = partUrl;
 exports.partHasBytes = partHasBytes;
 exports.unsupportedPart = unsupportedPart;
 exports.mediaFromUrl = mediaFromUrl;
+exports.promptCacheUnsupported = promptCacheUnsupported;
+exports.mcpUnsupported = mcpUnsupported;
 const errors_js_1 = require("../../errors.js");
 const transport_js_1 = require("../../transport.js");
 const util_js_1 = require("../../util.js");
@@ -189,4 +191,12 @@ function mediaFromUrl(type, url, fallbackMime) {
 }
 function dataUrlPayload(url) {
     return url?.match(/^data:[^,]*;base64,(.*)$/s)?.[1];
+}
+/** Context event for a provider with no request-level prompt-cache control. */
+function promptCacheUnsupported(provider) {
+    return { type: 'context', kind: 'prompt_cache_unsupported', data: { provider, reason: 'This provider has no request-level prompt-cache control here; any caching it does is implicit.' } };
+}
+/** Typed failure when a protocol cannot hand MCP servers to the provider. */
+function mcpUnsupported(provider, protocol) {
+    return new errors_js_1.AIError(`${provider} ${protocol} cannot connect provider-hosted MCP servers; use protocol: 'responses' or the anthropic engine`, { kind: 'invalid_request', retryable: false, provider });
 }

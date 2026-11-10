@@ -114,4 +114,14 @@ export const REASONING_BUDGET_TOKENS = {
     // 32 768 is the largest budget Gemini 2.5 Pro accepts.
     max: 32768,
 };
+/**
+ * Internal field carrying a handler-resolved MCP token to an engine. Not part
+ * of the public contract: callers supply `McpServer.authorization` (a KeyRef).
+ */
+export const MCP_TOKEN = '__resolvedAuthorization';
+/** The handler-resolved token for a provider-hosted MCP server, if any. */
+export function mcpToken(server) {
+    const value = server[MCP_TOKEN];
+    return typeof value === 'string' ? value : undefined;
+}
 //# sourceMappingURL=util.js.map

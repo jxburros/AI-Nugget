@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, partBase64, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, mcpUnsupported, partBase64, promptCacheUnsupported, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 export class GoogleAdapter {
     provider;
     constructor(provider) {
@@ -26,6 +26,7 @@ export class GoogleAdapter {
         let text = '';
         let inputTokens;
         let outputTokens;
+        let cachedTokens;
         let finish;
         const toolCalls = [];
         const media = [];
@@ -34,6 +35,10 @@ export class GoogleAdapter {
         const modelParts = [];
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw mcpUnsupported(conn.provider, 'generateContent');
+        if (req.promptCache)
+            yield promptCacheUnsupported(conn.provider);
         // Gemini rejects `responseMimeType: application/json` combined with function
         // declarations, so `body()` drops JSON mode when tools are present. Surface
         // that downgrade instead of silently returning unstructured text.
@@ -95,6 +100,7 @@ export class GoogleAdapter {
                 const usage = asRecord(record?.usageMetadata);
                 inputTokens = asNumber(usage?.promptTokenCount) ?? inputTokens;
                 outputTokens = asNumber(usage?.candidatesTokenCount) ?? outputTokens;
+                cachedTokens = asNumber(usage?.cachedContentTokenCount) ?? cachedTokens;
             }
             if (!finish)
                 yield streamAnomaly('stream ended without a finishReason');
@@ -105,7 +111,7 @@ export class GoogleAdapter {
                     providerState: { provider: conn.provider, model: req.model, content: [{ role: 'model', parts: modelParts }] },
                     toolCalls: hasTools ? toolCalls : undefined,
                     finishReason: mapFinish(finish, hasTools),
-                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
+                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, ...(cachedTokens !== undefined ? { cachedInputTokens: cachedTokens } : {}), estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
                     timing: { firstTokenMs, totalMs: Date.now() - started },
                     model: req.model,
                     source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
