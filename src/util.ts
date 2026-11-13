@@ -15,7 +15,7 @@ export function asNumber(value: unknown): number | undefined {
 export function promptChars(messages: ChatMessage[]): number {
   return messages.reduce((sum, message) => {
     if (typeof message.content === 'string') return sum + message.content.length;
-    return sum + message.content.reduce((partSum, part) => partSum + (part.text?.length ?? 0) + (part.imageBase64?.length ?? 0), 0);
+    return sum + message.content.reduce((partSum, part) => partSum + (part.text?.length ?? 0) + (part.imageBase64?.length ?? 0) + (part.dataBase64?.length ?? 0), 0);
   }, 0);
 }
 
@@ -111,10 +111,25 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * `thinkingBudget`). `'none'` is 0. Deliberately conservative: they are floors
  * a model may stop under, not ceilings it fills.
  */
-export const REASONING_BUDGET_TOKENS: Record<'none' | 'minimal' | 'low' | 'medium' | 'high', number> = {
+export const REASONING_BUDGET_TOKENS: Record<'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', number> = {
   none: 0,
   minimal: 1024,
   low: 2048,
   medium: 8192,
   high: 16384,
+  xhigh: 24576,
+  // 32 768 is the largest budget Gemini 2.5 Pro accepts.
+  max: 32768,
 };
+
+/**
+ * Internal field carrying a handler-resolved MCP token to an engine. Not part
+ * of the public contract: callers supply `McpServer.authorization` (a KeyRef).
+ */
+export const MCP_TOKEN = '__resolvedAuthorization';
+
+/** The handler-resolved token for a provider-hosted MCP server, if any. */
+export function mcpToken(server: object): string | undefined {
+  const value = (server as Record<string, unknown>)[MCP_TOKEN];
+  return typeof value === 'string' ? value : undefined;
+}

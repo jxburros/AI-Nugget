@@ -1,5 +1,6 @@
 import { createDefaultRedactor } from './redact.js';
-import type { AIErrorKind } from './types.js';
+import { parseRateLimitHeaders, retryDelayFromHeaders } from './ratelimit.js';
+import type { AIErrorKind, RateLimitInfo } from './types.js';
 
 /**
  * Pattern-based redaction applied at the wire boundary, before an error object
@@ -17,6 +18,8 @@ export class AIError extends Error {
   provider?: string;
   raw?: string;
   retryAfterMs?: number;
+  /** Rate-limit headers the provider sent with this failure, normalized. */
+  rateLimit?: RateLimitInfo;
 
   constructor(message: string, opts: {
     kind: AIErrorKind;
@@ -25,6 +28,7 @@ export class AIError extends Error {
     provider?: string;
     raw?: string;
     retryAfterMs?: number;
+    rateLimit?: RateLimitInfo;
     cause?: unknown;
   }) {
     super(message);
@@ -35,6 +39,7 @@ export class AIError extends Error {
     if (opts.provider !== undefined) this.provider = opts.provider;
     if (opts.raw !== undefined) this.raw = opts.raw;
     if (opts.retryAfterMs !== undefined) this.retryAfterMs = opts.retryAfterMs;
+    if (opts.rateLimit !== undefined) this.rateLimit = opts.rateLimit;
     if (opts.cause !== undefined) this.cause = opts.cause;
   }
 }
@@ -71,12 +76,14 @@ export function classify(status: number, body = '', provider?: string, headers?:
   // client-side request problem, so `invalid_request` is honest for it.
   else kind = 'invalid_request';
 
+  const rateLimit = parseRateLimitHeaders(headers);
   return new AIError(`HTTP ${status}: ${excerpt}`, {
     kind,
     status,
     provider,
     raw: excerpt,
-    retryAfterMs: parseRetryAfter(headers?.get('retry-after') ?? null),
+    retryAfterMs: retryDelayFromHeaders(headers, status, rateLimit),
+    rateLimit,
   });
 }
 
@@ -92,13 +99,4 @@ export function fromUnknown(error: unknown, provider?: string): AIError {
     return new AIError(error.message, { kind: 'network', provider, cause: error });
   }
   return new AIError('Unknown AI provider error', { kind: 'network', provider, cause: error });
-}
-
-function parseRetryAfter(value: string | null): number | undefined {
-  if (!value) return undefined;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
-  const time = Date.parse(value);
-  if (!Number.isNaN(time)) return Math.max(0, time - Date.now());
-  return undefined;
 }

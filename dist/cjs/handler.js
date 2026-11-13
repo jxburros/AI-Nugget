@@ -10,6 +10,7 @@ const json_js_1 = require("./json.js");
 const reasoning_js_1 = require("./reasoning.js");
 const policy_js_1 = require("./policy.js");
 const redact_js_1 = require("./redact.js");
+const ratelimit_js_1 = require("./ratelimit.js");
 const util_js_1 = require("./util.js");
 /**
  * A *startup* notice, so it fires once per process rather than once per handler
@@ -62,8 +63,27 @@ class AIHandler {
         // One idempotency key per logical call, reused across every retry attempt,
         // so a provider that supports it collapses a re-sent generation instead of
         // billing it twice (see `supportsIdempotencyKey` in the profile table).
-        const resolved = withIdempotencyKey(preflight.resolved, callId);
+        const keyed = withIdempotencyKey(preflight.resolved, callId);
+        // Capture rate-limit headers from every attempt's response at the transport
+        // seam, so no engine has to thread them through.
+        let rateLimit;
+        const baseTransport = keyed.fetch;
+        const resolved = {
+            ...keyed,
+            fetch: async (input, init) => {
+                const res = await (baseTransport ?? globalThis.fetch)(input, init);
+                rateLimit = (0, ratelimit_js_1.parseRateLimitHeaders)(res.headers) ?? rateLimit;
+                return res;
+            },
+        };
         const adapter = (0, index_js_1.adapterFor)(conn.provider, resolved.baseUrl, conn.protocol);
+        let adapterReq = req;
+        if (req.mcpServers?.length) {
+            const mcp = await this.resolveMcpServers(conn, req.mcpServers);
+            if (!mcp.ok)
+                return yield* this.failStream(callId, conn, req, startedAt, 1, mcp.error);
+            adapterReq = { ...req, mcpServers: mcp.servers };
+        }
         let acquired = false;
         let recorded = false;
         let attempt = 0;
@@ -79,7 +99,7 @@ class AIHandler {
                 // One stripper per attempt: a retried stream starts its tag state over.
                 const stripper = stripInline ? (0, reasoning_js_1.createReasoningStripper)() : null;
                 try {
-                    for await (const event of adapter.stream(resolved, req)) {
+                    for await (const event of adapter.stream(resolved, adapterReq)) {
                         if (event.type === 'start') {
                             if (!emittedStart) {
                                 emittedStart = true;
@@ -100,7 +120,7 @@ class AIHandler {
                             continue;
                         }
                         if (event.type === 'done') {
-                            let result = event.result;
+                            let result = rateLimit ? { ...event.result, rateLimit } : event.result;
                             if (stripper) {
                                 const tail = stripper.end();
                                 if (tail.reasoning)
@@ -194,6 +214,33 @@ class AIHandler {
         return { ok: true, resolved };
     }
     /** Record a failed call and emit the single redacted `error` event for it. */
+    /**
+     * Governs and resolves provider-hosted MCP servers: each URL must pass
+     * `policy.checkMcpServer` (when configured) and be `https://`, and each
+     * token comes from the KeySource and is registered for redaction. Resolved
+     * tokens ride an internal field the engines read; hooks never see them.
+     */
+    async resolveMcpServers(conn, servers) {
+        const out = [];
+        for (const server of servers) {
+            if (!/^https:\/\//i.test(server.url)) {
+                return { ok: false, error: new errors_js_1.AIError(`MCP server ${server.name} must use an https:// URL`, { kind: 'invalid_request', retryable: false, provider: conn.provider }) };
+            }
+            const verdict = this.policy.checkMcpServer?.(conn.provider, { name: server.name, url: server.url }) ?? { allowed: true };
+            if (!verdict.allowed)
+                return { ok: false, error: new errors_js_1.AIError(verdict.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider }) };
+            if (!server.authorization) {
+                out.push(server);
+                continue;
+            }
+            const key = await this.opts.keySource.resolve(server.authorization);
+            if (!key.ok)
+                return { ok: false, error: new errors_js_1.AIError(`MCP server ${server.name} token unavailable: ${key.reason}`, { kind: 'key_unavailable', retryable: false, provider: conn.provider }) };
+            this.sessionRedactor.addSecret(key.apiKey);
+            out.push({ ...server, [util_js_1.MCP_TOKEN]: key.apiKey ?? undefined });
+        }
+        return { ok: true, servers: out };
+    }
     async *failStream(callId, conn, req, startedAt, attempts, error) {
         await this.recordFailure(callId, conn, req, startedAt, attempts, error);
         yield { type: 'error', error: this.redactedError(error) };
@@ -245,7 +292,10 @@ class AIHandler {
      * caller supplies the schema.
      */
     async chatParsed(conn, req, schema) {
-        const base = { ...req, responseFormat: req.responseFormat ?? { type: 'json' } };
+        // A Standard JSON Schema validator (Zod 4.2+, Valibot, …) also yields the
+        // provider-side schema, so constrained decoding matches what we validate.
+        const derived = req.responseFormat ? undefined : (0, json_js_1.standardJsonSchema)(schema, 'output');
+        const base = { ...req, responseFormat: req.responseFormat ?? (derived ? { type: 'json', schema: derived } : { type: 'json' }) };
         let result = await this.chat(conn, base);
         let validated = await validateWithSchema(schema, result.text);
         if (validated.ok)
@@ -466,6 +516,7 @@ class AIHandler {
             metadata: req.metadata,
             promptChars: (0, util_js_1.promptChars)(req.messages),
             responseChars: result.text.length,
+            ...(result.rateLimit ? { rateLimit: result.rateLimit } : {}),
             ...(costUsd !== undefined ? { costUsd } : {}),
         });
     }
@@ -484,6 +535,7 @@ class AIHandler {
             metadata: req.metadata,
             promptChars: (0, util_js_1.promptChars)(req.messages),
             responseChars: 0,
+            ...(error.rateLimit ? { rateLimit: error.rateLimit } : {}),
         });
     }
     async record(record) {
@@ -508,6 +560,7 @@ class AIHandler {
             provider: error.provider,
             raw: error.raw === undefined ? undefined : this.redact(error.raw),
             retryAfterMs: error.retryAfterMs,
+            rateLimit: error.rateLimit,
             cause: this.redactedCause(error.cause),
         });
     }

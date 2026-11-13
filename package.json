@@ -1,6 +1,6 @@
 {
   "name": "@jxburros/ai-nugget",
-  "version": "0.7.5",
+  "version": "0.8.0",
   "private": false,
   "type": "module",
   "description": "Small isomorphic AI model nugget for provider calls, policy, redaction, telemetry, and agent loops.",
@@ -85,6 +85,9 @@
   },
   "overrides": {
     "nanoid": "^3.3.17",
-    "postcss": "^8.5.23"
+    "postcss": "^8.5.23",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.1"
+    }
   }
 }

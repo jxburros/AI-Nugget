@@ -102,7 +102,27 @@ same way.
 
 ## Argument validation
 
-`validateToolArgs` is intentionally light — object-ness, `required`, top-level
+Give a tool a [Standard Schema](https://standardschema.dev) validator as
+`input` and the loop validates arguments with it — fully — and passes its
+parsed output to `execute`. If the validator implements
+[Standard JSON Schema](https://standardschema.dev/json-schema) (Zod 4.2+,
+Valibot), `parameters` is derived from it, so one schema serves the provider
+and the check:
+
+```ts
+import { z } from 'zod';
+const weather = defineTool({
+  name: 'weather', description: 'Current weather for a city',
+  input: z.object({ city: z.string() }),
+  execute: ({ city }) => lookup(city),
+});
+```
+
+`defineTool` throws when it has neither `parameters` nor a convertible `input`.
+`chatParsed` uses the same conversion: with no `responseFormat` set, a schema
+that implements Standard JSON Schema becomes the request's JSON schema.
+
+Without `input`, `validateToolArgs` is intentionally light — object-ness, `required`, top-level
 `properties[key].type`. It is **not** a security boundary. Re-validate inside
 every `execute()`; see the
 [secure-tool recipe](./security.md#tool-argument-validation-is-a-filter-not-a-boundary).

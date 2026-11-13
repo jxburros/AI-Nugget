@@ -10,7 +10,7 @@ import { profileFor } from './profiles.js';
 export function adapterFor(provider: string, baseUrl?: string, protocol?: Connection['protocol']): ProviderAdapter {
   const profile = profileFor(provider, baseUrl);
   if (protocol === 'converse') return new ConverseAdapter(provider);
-  if (protocol === 'responses') return new ResponsesAdapter(provider, profile);
+  if (protocol === 'responses' || (protocol === undefined && profile.defaultProtocol === 'responses')) return new ResponsesAdapter(provider, profile);
   if (profile.engine === 'anthropic') return new AnthropicAdapter(provider);
   if (profile.engine === 'google') return new GoogleAdapter(provider);
   if (profile.engine === 'ollama') return new OllamaAdapter(provider);

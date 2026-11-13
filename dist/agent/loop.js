@@ -3,7 +3,7 @@ import { AIError } from '../errors.js';
 import { extractJson } from '../json.js';
 import { mergeUsage } from '../tokens.js';
 import { asRecord, sleep } from '../util.js';
-import { validateToolArgs } from './tools.js';
+import { validateToolInput } from './tools.js';
 export function runAgent(opts) {
     let resolveResult;
     const result = new Promise((resolve) => {
@@ -49,6 +49,8 @@ async function* run(opts, resolveResult) {
                 stopSequences: opts.stopSequences,
                 reasoningEffort: opts.reasoningEffort,
                 providerOptions: opts.providerOptions,
+                promptCache: opts.promptCache,
+                mcpServers: opts.mcpServers,
                 signal: agentSignal.signal,
                 metadata: { ...opts.metadata, agentStep: step },
             })) {
@@ -98,7 +100,7 @@ async function* run(opts, resolveResult) {
                     yield* appendToolError(opts, messages, step, call, `Unknown tool: ${call.name}`);
                     continue;
                 }
-                const validation = validateToolArgs(tool, call);
+                const validation = await validateToolInput(tool, call);
                 if (!validation.ok) {
                     yield* appendToolError(opts, messages, step, call, validation.message);
                     continue;
@@ -118,7 +120,7 @@ async function* run(opts, resolveResult) {
                         continue;
                     }
                     if (approval !== 'allow') {
-                        const modified = validateToolArgs(tool, { ...call, arguments: approval.modifiedArguments });
+                        const modified = await validateToolInput(tool, { ...call, arguments: approval.modifiedArguments });
                         if (!modified.ok) {
                             yield* appendToolError(opts, messages, step, call, modified.message);
                             continue;

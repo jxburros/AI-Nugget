@@ -71,6 +71,13 @@ export declare class AIHandler {
      */
     private preflight;
     /** Record a failed call and emit the single redacted `error` event for it. */
+    /**
+     * Governs and resolves provider-hosted MCP servers: each URL must pass
+     * `policy.checkMcpServer` (when configured) and be `https://`, and each
+     * token comes from the KeySource and is registered for redaction. Resolved
+     * tokens ride an internal field the engines read; hooks never see them.
+     */
+    private resolveMcpServers;
     private failStream;
     listModels(conn: Connection): Promise<ModelInfo[]>;
     testConnection(conn: Connection): Promise<{

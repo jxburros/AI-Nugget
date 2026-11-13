@@ -9,6 +9,14 @@ exports.parseArgs = parseArgs;
 exports.safeParse = safeParse;
 exports.randomId = randomId;
 exports.streamAnomaly = streamAnomaly;
+exports.partBase64 = partBase64;
+exports.partMime = partMime;
+exports.partUrl = partUrl;
+exports.partHasBytes = partHasBytes;
+exports.unsupportedPart = unsupportedPart;
+exports.mediaFromUrl = mediaFromUrl;
+exports.promptCacheUnsupported = promptCacheUnsupported;
+exports.mcpUnsupported = mcpUnsupported;
 const errors_js_1 = require("../../errors.js");
 const transport_js_1 = require("../../transport.js");
 const util_js_1 = require("../../util.js");
@@ -148,4 +156,47 @@ function asCapabilities(row) {
     if (typeof value === 'string')
         return [value];
     return undefined;
+}
+/** Base64 payload of a non-text part (`dataBase64`, or the legacy `imageBase64`). */
+function partBase64(part) {
+    return part.dataBase64 ?? part.imageBase64 ?? dataUrlPayload(part.url);
+}
+/** Default MIME type per part kind when the caller did not set one. */
+function partMime(part) {
+    if (part.mimeType)
+        return part.mimeType;
+    const fromUrl = part.url?.match(/^data:([^;,]+)[;,]/)?.[1];
+    if (fromUrl)
+        return fromUrl;
+    return part.type === 'image' ? 'image/png' : part.type === 'audio' ? 'audio/wav' : part.type === 'video' ? 'video/mp4' : part.type === 'file' ? 'application/pdf' : 'text/plain';
+}
+/** A `data:` URL for the part, or its caller-supplied URL. */
+function partUrl(part) {
+    if (part.url)
+        return part.url;
+    return `data:${partMime(part)};base64,${partBase64(part) ?? ''}`;
+}
+/** True when the part carries inline bytes rather than only a remote URL. */
+function partHasBytes(part) {
+    return (part.dataBase64 ?? part.imageBase64) !== undefined || (part.url?.startsWith('data:') ?? false);
+}
+/** Typed, non-retryable failure for a content part this protocol cannot carry. */
+function unsupportedPart(provider, part, detail = '') {
+    return new errors_js_1.AIError(`${provider} cannot accept ${part.type} input${detail ? ` ${detail}` : ''} on this protocol`, { kind: 'invalid_request', retryable: false, provider });
+}
+/** Builds a {@link MediaOutput} from a `data:` URL or a remote URL. */
+function mediaFromUrl(type, url, fallbackMime) {
+    const match = url.match(/^data:([^;,]+);base64,(.*)$/s);
+    return match ? { type, mimeType: match[1], dataBase64: match[2] } : { type, mimeType: fallbackMime, url };
+}
+function dataUrlPayload(url) {
+    return url?.match(/^data:[^,]*;base64,(.*)$/s)?.[1];
+}
+/** Context event for a provider with no request-level prompt-cache control. */
+function promptCacheUnsupported(provider) {
+    return { type: 'context', kind: 'prompt_cache_unsupported', data: { provider, reason: 'This provider has no request-level prompt-cache control here; any caching it does is implicit.' } };
+}
+/** Typed failure when a protocol cannot hand MCP servers to the provider. */
+function mcpUnsupported(provider, protocol) {
+    return new errors_js_1.AIError(`${provider} ${protocol} cannot connect provider-hosted MCP servers; use protocol: 'responses' or the anthropic engine`, { kind: 'invalid_request', retryable: false, provider });
 }

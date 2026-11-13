@@ -19,4 +19,10 @@ export declare class OpenAIChatAdapter implements ProviderAdapter {
  * did not already pin `reasoning_effort` (in which case the choice is theirs).
  */
 export declare function shouldRetryWithoutReasoningEffort(error: unknown, req: ChatRequest): boolean;
+/**
+ * OpenAI-family prompt-cache fields. `extended` asks for the longer lifetime:
+ * `prompt_cache_options.ttl: '12h'` on the Responses API for GPT-5.6+, and
+ * `prompt_cache_retention: '24h'` everywhere else.
+ */
+export declare function openAiPromptCache(req: ChatRequest, responsesApi?: boolean): Record<string, unknown>;
 //# sourceMappingURL=openaiChat.d.ts.map

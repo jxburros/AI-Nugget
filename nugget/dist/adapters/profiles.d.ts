@@ -52,16 +52,24 @@ export interface ProviderProfile {
          * sending an unknown header is harmless, but claiming the guarantee is not.
          */
         supportsIdempotencyKey?: boolean;
+        /**
+         * Provider takes OpenAI-family prompt-cache fields (`prompt_cache_key`,
+         * `prompt_cache_retention`) for `ChatRequest.promptCache`. Off means the
+         * request carries none and a `prompt_cache_unsupported` event is emitted.
+         */
+        promptCache?: boolean;
     };
     listModelsPath?: string;
     healthPath?: string;
+    /** Wire protocol used when the connection does not set `protocol` (default: the engine's own). */
+    defaultProtocol?: 'responses';
 }
 /**
  * The provider keys that have a profile in {@link PROVIDER_PROFILES}. Used to
  * type `Connection.provider` so IDEs autocomplete valid names and typos are a
  * compile error rather than a silent fall-through to `openai-compat`.
  */
-export type KnownProvider = 'openai' | 'azure-openai' | 'openrouter' | 'groq' | 'deepseek' | 'mistral' | 'together' | 'fireworks' | 'cerebras' | 'moonshot' | 'cohere' | 'perplexity' | 'lmstudio' | 'llamacpp' | 'vllm' | 'ollama' | 'anthropic' | 'google' | 'minimax' | 'zai' | 'dashscope' | 'huggingface' | 'deepinfra' | 'sambanova' | 'nvidia' | 'cloudflare' | 'bedrock' | 'vertex' | 'azure-openai-v1' | 'openai-compat';
+export type KnownProvider = 'openai' | 'azure-openai' | 'openrouter' | 'groq' | 'deepseek' | 'mistral' | 'together' | 'fireworks' | 'cerebras' | 'moonshot' | 'meta' | 'vercel' | 'cohere' | 'perplexity' | 'lmstudio' | 'llamacpp' | 'vllm' | 'ollama' | 'anthropic' | 'google' | 'minimax' | 'zai' | 'dashscope' | 'huggingface' | 'deepinfra' | 'sambanova' | 'nvidia' | 'cloudflare' | 'bedrock' | 'vertex' | 'azure-openai-v1' | 'open-responses' | 'openai-compat';
 export declare const PROVIDER_PROFILES: Record<KnownProvider, ProviderProfile> & Record<string, ProviderProfile>;
 export declare function profileFor(provider: string, baseUrl?: string): ProviderProfile;
 export declare function applyAuth(profile: ProviderProfile, apiKey: string | null, headers: Record<string, string>): Record<string, string>;

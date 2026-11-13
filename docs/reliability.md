@@ -96,6 +96,46 @@ workload is cost-sensitive:
   `Connection.headers` if the provider honors one that isn't in the table yet —
   and please open an issue so the profile can be updated.
 
+## Rate-limit headers
+
+Every chat response's headers are parsed by `parseRateLimitHeaders` into a
+`RateLimitInfo`: `remainingRequests`, `remainingTokens`, `limitRequests`,
+`limitTokens`, `resetMs`, and the raw IETF `policies` when present. Sources:
+
+- IETF `RateLimit` / `RateLimit-Policy` (draft-ietf-httpapi-ratelimit-headers),
+  e.g. `RateLimit: "default";r=0;t=30`;
+- OpenAI/Groq-style `x-ratelimit-{limit,remaining,reset}-{requests,tokens}`
+  (resets like `6m0s` or `120ms`);
+- Anthropic `anthropic-ratelimit-{requests,tokens}-{limit,remaining,reset}`.
+
+The result lands on `ChatResult.rateLimit`, on `AIError.rateLimit` for a failed
+call, and on the telemetry `CallRecord.rateLimit`. Retry delay order is
+`retry-after-ms`, then `Retry-After`, then — for a 429 only — the reset of the
+exhausted window (`resetMs`), all capped at `maxDelayMs`. These are hints from
+the provider: a positive remaining count does not guarantee the next call is
+served.
+
+## Prompt caching
+
+`ChatRequest.promptCache` (also `AgentOptions.promptCache`) is one portable knob:
+
+```ts
+await handler.chat(conn, { model, messages, promptCache: { key: 'tenant-42', retention: 'extended' } });
+```
+
+| Engine / profile | What is sent |
+|---|---|
+| `anthropic` | top-level `cache_control: { type: 'ephemeral' }` (automatic caching); `extended` → `ttl: '1h'` |
+| `openai`, `azure-openai-v1`, `meta` (Chat Completions) | `prompt_cache_key`; `extended` → `prompt_cache_retention: '24h'` |
+| same, `protocol: 'responses'` | as above; GPT-5.6+ `extended` → `prompt_cache_options: { ttl: '12h' }` |
+| everything else | nothing; a `prompt_cache_unsupported` context event says so |
+
+Usage reports the effect: `usage.cachedInputTokens` (served from cache) and
+`usage.cacheWriteTokens` (written this call). Both are subsets of
+`usage.inputTokens`, which is the full prompt size on every engine since 0.8.0.
+Explicit per-block breakpoints remain available through `providerOptions` or
+content-level provider fields.
+
 ## Concurrency and rate limits are per-instance
 
 `limits: { maxConcurrent, minIntervalMs }` is enforced by an **in-memory queue

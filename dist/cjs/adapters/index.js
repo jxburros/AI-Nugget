@@ -13,7 +13,7 @@ function adapterFor(provider, baseUrl, protocol) {
     const profile = (0, profiles_js_1.profileFor)(provider, baseUrl);
     if (protocol === 'converse')
         return new converse_js_1.ConverseAdapter(provider);
-    if (protocol === 'responses')
+    if (protocol === 'responses' || (protocol === undefined && profile.defaultProtocol === 'responses'))
         return new responses_js_1.ResponsesAdapter(provider, profile);
     if (profile.engine === 'anthropic')
         return new anthropic_js_1.AnthropicAdapter(provider);

@@ -9,7 +9,7 @@ export function adapterFor(provider, baseUrl, protocol) {
     const profile = profileFor(provider, baseUrl);
     if (protocol === 'converse')
         return new ConverseAdapter(provider);
-    if (protocol === 'responses')
+    if (protocol === 'responses' || (protocol === undefined && profile.defaultProtocol === 'responses'))
         return new ResponsesAdapter(provider, profile);
     if (profile.engine === 'anthropic')
         return new AnthropicAdapter(provider);

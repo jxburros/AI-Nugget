@@ -1,5 +1,29 @@
+import { AIError } from '../errors.js';
+import { standardJsonSchema } from '../json.js';
+/**
+ * Define a tool. Pass a JSON Schema `parameters`, or a Standard Schema `input`
+ * that implements Standard JSON Schema (Zod 4.2+, Valibot) and the parameters
+ * schema is derived from it — one schema for the provider and the validator.
+ */
 export function defineTool(spec) {
-    return spec;
+    if (spec.parameters)
+        return spec;
+    const parameters = standardJsonSchema(spec.input, 'input');
+    if (!parameters) {
+        throw new AIError(`Tool ${spec.name} needs \`parameters\`, or an \`input\` schema that implements Standard JSON Schema`, { kind: 'invalid_request', retryable: false });
+    }
+    return { ...spec, parameters };
+}
+/** Validate arguments with the tool's Standard Schema `input`, or the light built-in check. */
+export async function validateToolInput(tool, call) {
+    if (!tool.input)
+        return validateToolArgs(tool, call);
+    const result = await tool.input['~standard'].validate(call.arguments);
+    if (result.issues) {
+        const message = result.issues.map((issue) => issue.message).join('; ') || 'validation failed';
+        return { ok: false, message: `Tool ${tool.name} arguments invalid: ${message}` };
+    }
+    return { ok: true, args: result.value };
 }
 /**
  * Light validation only: object-ness, `required` presence, and top-level

@@ -1,4 +1,5 @@
 import { AIError } from './errors.js';
+import type { StandardSchemaV1 } from './types.js';
 
 export function extractJson(text: string): unknown | null {
   const trimmed = text.trim();
@@ -105,4 +106,27 @@ function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {
   } catch {
     return { ok: false };
   }
+}
+
+/**
+ * JSON Schema for a Standard Schema validator that implements the
+ * [Standard JSON Schema](https://standardschema.dev/json-schema) extension,
+ * or undefined when it does not (or cannot convert). Targets draft-07 first —
+ * the dialect provider tool/response schemas accept most widely — then
+ * draft-2020-12. The top-level `$schema` marker is removed because several
+ * providers reject unknown keywords there.
+ */
+export function standardJsonSchema(schema: unknown, io: 'input' | 'output' = 'input'): Record<string, unknown> | undefined {
+  const converter = (schema as StandardSchemaV1 | undefined)?.['~standard']?.jsonSchema;
+  const convert = converter?.[io];
+  if (typeof convert !== 'function') return undefined;
+  for (const target of ['draft-07', 'draft-2020-12']) {
+    try {
+      const { $schema: _dialect, ...rest } = convert({ target });
+      return rest;
+    } catch {
+      // try the next target
+    }
+  }
+  return undefined;
 }

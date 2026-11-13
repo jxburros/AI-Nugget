@@ -2,6 +2,9 @@
 
 Status: proposed, not implemented. Requested 2026-10-27 as audit item 13.
 The provider/cloud work in 0.7.5 is the foundation, not completion of this plan.
+Update 2026-11-10: milestone 2 (rich chat parts) and the Meta chat profile landed
+as `ContentPart` audio/video/file/url support and the `meta` profile; uploaded-file
+references, size limits and Meta operation adapters remain open.
 
 ## Goal and boundaries
 

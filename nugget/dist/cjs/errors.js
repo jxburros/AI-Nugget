@@ -5,6 +5,7 @@ exports.defaultRetryable = defaultRetryable;
 exports.classify = classify;
 exports.fromUnknown = fromUnknown;
 const redact_js_1 = require("./redact.js");
+const ratelimit_js_1 = require("./ratelimit.js");
 /**
  * Pattern-based redaction applied at the wire boundary, before an error object
  * exists. `AIHandler` redacts again on the way out (adding session-registered
@@ -20,6 +21,8 @@ class AIError extends Error {
     provider;
     raw;
     retryAfterMs;
+    /** Rate-limit headers the provider sent with this failure, normalized. */
+    rateLimit;
     constructor(message, opts) {
         super(message);
         this.name = 'AIError';
@@ -33,6 +36,8 @@ class AIError extends Error {
             this.raw = opts.raw;
         if (opts.retryAfterMs !== undefined)
             this.retryAfterMs = opts.retryAfterMs;
+        if (opts.rateLimit !== undefined)
+            this.rateLimit = opts.rateLimit;
         if (opts.cause !== undefined)
             this.cause = opts.cause;
     }
@@ -75,12 +80,14 @@ function classify(status, body = '', provider, headers) {
     // client-side request problem, so `invalid_request` is honest for it.
     else
         kind = 'invalid_request';
+    const rateLimit = (0, ratelimit_js_1.parseRateLimitHeaders)(headers);
     return new AIError(`HTTP ${status}: ${excerpt}`, {
         kind,
         status,
         provider,
         raw: excerpt,
-        retryAfterMs: parseRetryAfter(headers?.get('retry-after') ?? null),
+        retryAfterMs: (0, ratelimit_js_1.retryDelayFromHeaders)(headers, status, rateLimit),
+        rateLimit,
     });
 }
 function fromUnknown(error, provider) {
@@ -96,15 +103,4 @@ function fromUnknown(error, provider) {
         return new AIError(error.message, { kind: 'network', provider, cause: error });
     }
     return new AIError('Unknown AI provider error', { kind: 'network', provider, cause: error });
-}
-function parseRetryAfter(value) {
-    if (!value)
-        return undefined;
-    const seconds = Number(value);
-    if (Number.isFinite(seconds))
-        return Math.max(0, seconds * 1000);
-    const time = Date.parse(value);
-    if (!Number.isNaN(time))
-        return Math.max(0, time - Date.now());
-    return undefined;
 }

@@ -32,6 +32,7 @@ class AnthropicAdapter {
         let text = '';
         let inputTokens;
         let outputTokens;
+        const cache = {};
         let stopReason;
         let sawTerminal = false;
         const emittedTools = [];
@@ -54,7 +55,9 @@ class AnthropicAdapter {
             yield { type: 'context', kind: 'json_mode_downgraded', data: { provider: conn.provider, reason: 'Claude native JSON outputs require a schema; using a JSON instruction without constrained decoding.' } };
         }
         try {
-            const res = await (0, transport_js_1.postResponse)(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), conn.headers, timeout.signal, conn.provider, conn.fetch);
+            // The MCP connector is a beta: the header is added only when servers are sent.
+            const headers = req.mcpServers?.length ? withBeta(conn.headers, MCP_BETA) : conn.headers;
+            const res = await (0, transport_js_1.postResponse)(`${conn.baseUrl}/v1/messages`, body(req, jsonMode), headers, timeout.signal, conn.provider, conn.fetch);
             const contentType = res.headers.get('content-type') ?? '';
             if (!contentType.includes('text/event-stream')) {
                 const data = await res.json();
@@ -66,7 +69,7 @@ class AnthropicAdapter {
                         if (record)
                             responseBlocks.set(i, record);
                     });
-                inputTokens = parsed.inputTokens;
+                inputTokens = readUsage((0, util_js_1.asRecord)((0, util_js_1.asRecord)(data)?.usage), cache) ?? parsed.inputTokens;
                 outputTokens = parsed.outputTokens;
                 stopReason = parsed.stopReason;
                 sawTerminal = true;
@@ -99,7 +102,7 @@ class AnthropicAdapter {
                     }
                     else if (type === 'message_start') {
                         const usage = (0, util_js_1.asRecord)((0, util_js_1.asRecord)(record.message)?.usage);
-                        inputTokens = (0, util_js_1.asNumber)(usage?.input_tokens) ?? inputTokens;
+                        inputTokens = readUsage(usage, cache) ?? inputTokens;
                         outputTokens = (0, util_js_1.asNumber)(usage?.output_tokens) ?? outputTokens;
                     }
                     else if (type === 'content_block_start') {
@@ -145,6 +148,10 @@ class AnthropicAdapter {
                     }
                     else if (type === 'content_block_stop') {
                         const index = (0, util_js_1.asNumber)(record.index) ?? 0;
+                        const finished = responseBlocks.get(index);
+                        // Provider-executed MCP calls/results: visible, and kept in providerState for replay.
+                        if (finished?.type === 'mcp_tool_use' || finished?.type === 'mcp_tool_result')
+                            yield { type: 'context', kind: String(finished.type), data: finished };
                         const partial = blocks.get(index);
                         if (partial) {
                             const call = { id: partial.id, name: partial.name, raw: partial.raw, arguments: (0, base_js_1.parseArgs)(partial.raw) };
@@ -174,6 +181,7 @@ class AnthropicAdapter {
                         stopReason = (0, util_js_1.asString)(delta?.stop_reason) ?? stopReason;
                         const usage = (0, util_js_1.asRecord)(record.usage);
                         outputTokens = (0, util_js_1.asNumber)(usage?.output_tokens) ?? outputTokens;
+                        inputTokens = readUsage(usage, cache) ?? inputTokens;
                     }
                 }
             }
@@ -185,7 +193,9 @@ class AnthropicAdapter {
                     providerState: { provider: conn.provider, model: req.model, content: [...responseBlocks.entries()].sort(([a], [b]) => a - b).map(([, block]) => block) },
                     toolCalls: hasTools ? emittedTools : undefined,
                     finishReason: mapStop(stopReason, hasTools),
-                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : (0, tokens_js_1.estimatedUsage)((0, util_js_1.textFromMessages)(req.messages), text),
+                    usage: inputTokens !== undefined || outputTokens !== undefined
+                        ? { inputTokens, outputTokens, ...(cache.read !== undefined ? { cachedInputTokens: cache.read } : {}), ...(cache.write !== undefined ? { cacheWriteTokens: cache.write } : {}), estimated: false }
+                        : (0, tokens_js_1.estimatedUsage)((0, util_js_1.textFromMessages)(req.messages), text),
                     timing: { firstTokenMs, totalMs: Date.now() - started },
                     model: req.model,
                     source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
@@ -279,6 +289,24 @@ function body(req, jsonMode) {
     }
     // providerOptions carries Anthropic-native fields (`thinking`, `metadata`,
     // top-level `cache_control` extras, `service_tier`, …) without a release.
+    if (req.promptCache) {
+        // Automatic caching: one top-level breakpoint the API moves forward as the conversation grows.
+        base.cache_control = req.promptCache.retention === 'extended' ? { type: 'ephemeral', ttl: '1h' } : { type: 'ephemeral' };
+    }
+    if (req.mcpServers?.length) {
+        base.mcp_servers = req.mcpServers.map((server) => {
+            const token = (0, util_js_1.mcpToken)(server);
+            return { type: 'url', url: server.url, name: server.name, ...(token ? { authorization_token: token } : {}) };
+        });
+        base.tools = [...(Array.isArray(base.tools) ? base.tools : []), ...req.mcpServers.map((server) => ({
+                type: 'mcp_toolset',
+                mcp_server_name: server.name,
+                ...(server.allowedTools ? {
+                    default_config: { enabled: false },
+                    configs: Object.fromEntries(server.allowedTools.map((name) => [name, { enabled: true }])),
+                } : {}),
+            }))];
+    }
     const result = (0, util_js_1.applyProviderOptions)(base, req.providerOptions, ['output_config']);
     if (modernModel(req.model)) {
         delete result.temperature;
@@ -329,13 +357,33 @@ function toAnthropicMessage(m, model) {
         content: typeof m.content === 'string' ? m.content : contentBlocks(m.content),
     };
 }
-/** Maps text/image content — a string or a ContentPart[] — onto Anthropic content blocks. */
+/** Maps text/image/document content — a string or a ContentPart[] — onto Anthropic content blocks. */
 function contentBlocks(content) {
     if (typeof content === 'string')
         return content ? [{ type: 'text', text: content }] : [];
-    return content.map((part) => part.type === 'image'
-        ? { type: 'image', source: { type: 'base64', media_type: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
-        : { type: 'text', text: part.text ?? '' });
+    return content.map(anthropicBlock);
+}
+/**
+ * Images and documents (PDF, plain text) by base64 or URL. Claude has no
+ * audio or video input, so those fail as a typed `invalid_request`.
+ */
+function anthropicBlock(part) {
+    if (part.type === 'text')
+        return { type: 'text', text: part.text ?? '' };
+    if (part.type === 'audio' || part.type === 'video')
+        throw (0, base_js_1.unsupportedPart)('anthropic', part);
+    const blockType = part.type === 'image' ? 'image' : 'document';
+    const mime = (0, base_js_1.partMime)(part);
+    const source = !(0, base_js_1.partHasBytes)(part)
+        ? { type: 'url', url: part.url ?? '' }
+        : blockType === 'document' && mime.startsWith('text/')
+            ? { type: 'text', media_type: 'text/plain', data: decodeBase64Text((0, base_js_1.partBase64)(part) ?? '') }
+            : { type: 'base64', media_type: mime, data: (0, base_js_1.partBase64)(part) ?? '' };
+    return { type: blockType, source, ...(blockType === 'document' && part.filename ? { title: part.filename } : {}) };
+}
+function decodeBase64Text(data) {
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
 }
 function textContent(content) {
     if (typeof content === 'string')
@@ -394,4 +442,35 @@ function alwaysThinking(model) {
 }
 function noForcedTools(model) {
     return /^claude-(?:(?:opus|sonnet)-5-5(?:-|$)|(?:fable|mythos)-5-1(?:-|$))/.test(model);
+}
+const MCP_BETA = 'mcp-client-2025-11-20';
+/** Adds a beta flag to `anthropic-beta`, keeping any the caller already set. */
+function withBeta(headers, beta) {
+    const name = Object.keys(headers).find((key) => key.toLowerCase() === 'anthropic-beta');
+    const existing = name ? headers[name].split(',').map((part) => part.trim()).filter(Boolean) : [];
+    if (existing.includes(beta))
+        return headers;
+    const next = { ...headers };
+    if (name)
+        delete next[name];
+    next['anthropic-beta'] = [...existing, beta].join(',');
+    return next;
+}
+/**
+ * Total prompt tokens from an Anthropic usage object. Anthropic's
+ * `input_tokens` excludes cache reads and writes; the nugget reports the total
+ * so `inputTokens` means the same thing across providers, with the cache split
+ * recorded separately.
+ */
+function readUsage(usage, cache) {
+    const input = (0, util_js_1.asNumber)(usage?.input_tokens);
+    const read = (0, util_js_1.asNumber)(usage?.cache_read_input_tokens);
+    const write = (0, util_js_1.asNumber)(usage?.cache_creation_input_tokens);
+    if (read !== undefined)
+        cache.read = read;
+    if (write !== undefined)
+        cache.write = write;
+    if (input === undefined)
+        return undefined;
+    return input + (read ?? 0) + (write ?? 0);
 }

@@ -1,10 +1,10 @@
 import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
-import type { ChatMessage, ChatRequest, ChatResult, EmbedRequest, EmbedResult, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
+import type { ChatMessage, ChatRequest, ChatResult, ContentPart, EmbedRequest, EmbedResult, MediaOutput, ProviderAdapter, ResolvedConnection, StreamEvent, ToolCall } from '../../types.js';
 import { applyProviderOptions, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
 import type { ProviderProfile } from '../profiles.js';
-import { DEFAULT_TIMEOUT_MS, health, listOpenModels, parseArgs, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, health, listOpenModels, mcpUnsupported, mediaFromUrl, promptCacheUnsupported, parseArgs, partBase64, partHasBytes, partMime, partUrl, randomId, safeParse, streamAnomaly, streamError, streamTimeout, unsupportedPart } from './base.js';
 
 export class OpenAIChatAdapter implements ProviderAdapter {
   readonly provider: string;
@@ -32,9 +32,18 @@ export class OpenAIChatAdapter implements ProviderAdapter {
     let finish: string | undefined;
     let sawTerminal = false;
     let reasoningText = '';
+    // Echo reasoning back under the key it arrived in: DeepSeek/Kimi/Z.AI read
+    // `reasoning_content`, Together/Groq-style servers read `reasoning`.
+    let reasoningKey: 'reasoning_content' | 'reasoning' = 'reasoning_content';
+    const media: MediaOutput[] = [];
+    let audioData = '';
+    let audioTranscript = '';
     let assistantState: Record<string, unknown> | undefined;
     const timeout = streamTimeout(conn, req.signal);
     yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+    if (req.mcpServers?.length) throw mcpUnsupported(conn.provider, 'Chat Completions');
+    if (req.promptCache && !this.profile.quirks?.promptCache) yield promptCacheUnsupported(conn.provider);
+    let cachedTokens: number | undefined;
     try {
       let res: Response;
       try {
@@ -72,7 +81,9 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         assistantState = asRecord(asRecord(Array.isArray(choices) ? choices[0] : undefined)?.message);
         text = parsed.text;
         toolCalls = parsed.toolCalls;
+        for (const item of parsed.media) { media.push(item); yield { type: 'context', kind: 'media', data: item }; }
         inputTokens = parsed.inputTokens;
+        cachedTokens = parsed.cachedTokens;
         outputTokens = parsed.outputTokens;
         finish = parsed.finish;
         sawTerminal = true;
@@ -89,6 +100,7 @@ export class OpenAIChatAdapter implements ProviderAdapter {
           const usage = asRecord(record.usage);
           inputTokens = asNumber(usage?.prompt_tokens) ?? inputTokens;
           outputTokens = asNumber(usage?.completion_tokens) ?? outputTokens;
+          cachedTokens = asNumber(asRecord(usage?.prompt_tokens_details)?.cached_tokens) ?? cachedTokens;
           const choices = Array.isArray(record.choices) ? record.choices : [];
           const choice = asRecord(choices[0]);
           finish = asString(choice?.finish_reason) ?? finish;
@@ -97,8 +109,16 @@ export class OpenAIChatAdapter implements ProviderAdapter {
           // Reasoning tokens (DeepSeek `reasoning_content`, others `reasoning`)
           // ride their own channel so they don't contaminate the answer text.
           const reasoning = asString(delta?.reasoning_content) ?? asString(delta?.reasoning);
+          if (reasoning && asString(delta?.reasoning_content) === undefined) reasoningKey = 'reasoning';
           if (reasoning) reasoningText += reasoning;
           if (reasoning) yield { type: 'reasoning', text: reasoning };
+          // In-band media: OpenRouter-style `delta.images` and chat `delta.audio`.
+          for (const item of imagesFrom(delta?.images)) { media.push(item); yield { type: 'context', kind: 'media', data: item }; }
+          const audio = asRecord(delta?.audio);
+          if (audio) {
+            audioData += asString(audio.data) ?? '';
+            audioTranscript += asString(audio.transcript) ?? '';
+          }
           const piece = asString(delta?.content);
           if (piece) {
             if (firstTokenMs === null) firstTokenMs = Date.now() - started;
@@ -125,12 +145,19 @@ export class OpenAIChatAdapter implements ProviderAdapter {
         }));
         for (const call of toolCalls) yield { type: 'tool_call', call };
       }
+      if (audioData) {
+        const item: MediaOutput = { type: 'audio', mimeType: audioMime(req), dataBase64: audioData, ...(audioTranscript ? { transcript: audioTranscript } : {}) };
+        media.push(item);
+        yield { type: 'context', kind: 'media', data: item };
+      }
       if (!sawTerminal) yield streamAnomaly('stream ended without a finish_reason');
       const result = makeResult(conn, req, text, toolCalls, finish, started, firstTokenMs, inputTokens, outputTokens);
+      if (media.length) result.media = media;
+      if (cachedTokens !== undefined && !result.usage.estimated) result.usage.cachedInputTokens = cachedTokens;
       if (this.profile.quirks?.preserveAssistantState) {
         result.providerState = { provider: conn.provider, model: req.model, protocol: 'chat-completions', content: [assistantState ?? {
           role: 'assistant', content: text,
-          ...(reasoningText ? { reasoning_content: reasoningText } : {}),
+          ...(reasoningText ? { [reasoningKey]: reasoningText } : {}),
           ...(toolCalls.length ? { tool_calls: toolCalls.map(call => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })) } : {}),
         }] };
       }
@@ -190,13 +217,13 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile, provider: string
     messages: req.messages.map(message => {
       const state = message.providerState;
       return profile.quirks?.preserveAssistantState && message.role === 'assistant' && state?.provider === provider && state.model === req.model && state.protocol === 'chat-completions'
-        ? state.content[0] ?? toOpenAiMessage(message) : toOpenAiMessage(message);
+        ? state.content[0] ?? toOpenAiMessage(message, provider) : toOpenAiMessage(message, provider);
     }),
     temperature: req.temperature,
     top_p: req.topP,
     stop: req.stopSequences,
     response_format: responseFormatFor(req, profile),
-    tools: req.tools?.map((tool) => ({ type: 'function', function: tool })),
+    tools: req.tools?.map((tool) => ({ type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } })),
     tool_choice: typeof req.toolChoice === 'object' ? { type: 'function', function: { name: req.toolChoice.name } } : req.toolChoice,
     stream: true,
     // Many OpenAI-compatible local servers (llama.cpp, LM Studio, vLLM) choke
@@ -211,6 +238,7 @@ function openAiBody(req: ChatRequest, profile: ProviderProfile, provider: string
   // providerOptions carries OpenAI-native fields the nugget doesn't model
   // (`reasoning_effort`, `parallel_tool_calls`, `seed`, `logprobs`, …). `apiVersion`
   // is consumed by urlFor for Azure and stripped here so it never hits the body.
+  if (req.promptCache && profile.quirks?.promptCache) Object.assign(body, openAiPromptCache(req));
   const { apiVersion, ...passthrough } = req.providerOptions ?? {};
   void apiVersion;
   return applyProviderOptions(body, Object.keys(passthrough).length ? passthrough : undefined);
@@ -224,14 +252,12 @@ function responseFormatFor(req: ChatRequest, profile: ProviderProfile): Record<s
   return { type: 'json_object' };
 }
 
-function toOpenAiMessage(message: ChatMessage): Record<string, unknown> {
+function toOpenAiMessage(message: ChatMessage, provider: string): Record<string, unknown> {
   return {
     role: message.role,
     content: typeof message.content === 'string'
       ? message.content
-      : message.content.map((part) => part.type === 'image'
-        ? { type: 'image_url', image_url: { url: `data:${part.mimeType ?? 'image/png'};base64,${part.imageBase64 ?? ''}` } }
-        : { type: 'text', text: part.text ?? '' }),
+      : message.content.map((part) => openAiPart(part, provider)),
     name: message.role === 'tool' ? message.name : undefined,
     tool_call_id: message.toolCallId,
     tool_calls: message.toolCalls?.map((call) => ({ id: call.id, type: 'function', function: { name: call.name, arguments: call.raw ?? JSON.stringify(call.arguments) } })),
@@ -252,7 +278,55 @@ function urlFor(conn: ResolvedConnection, profile: ProviderProfile, req: ChatReq
   return joinUrl(conn.baseUrl, '/chat/completions');
 }
 
-function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; toolCalls: ToolCall[]; inputTokens?: number; outputTokens?: number; finish?: string } {
+/**
+ * Chat Completions content parts. `image_url`, `input_audio` and `file` are
+ * OpenAI's own shapes; `video_url` is the de-facto extension used by Kimi,
+ * Meta Model API and Qwen — a server without it answers with an honest 400.
+ */
+function openAiPart(part: ContentPart, provider: string): Record<string, unknown> {
+  switch (part.type) {
+    case 'image':
+      return { type: 'image_url', image_url: { url: partUrl(part) } };
+    case 'audio': {
+      if (!partHasBytes(part)) throw unsupportedPart(provider, part, 'by URL (send base64 bytes)');
+      return { type: 'input_audio', input_audio: { data: partBase64(part) ?? '', format: audioFormat(partMime(part)) } };
+    }
+    case 'video':
+      return { type: 'video_url', video_url: { url: partUrl(part) } };
+    case 'file': {
+      if (!partHasBytes(part)) throw unsupportedPart(provider, part, 'by URL (send base64 bytes)');
+      return { type: 'file', file: { filename: part.filename ?? 'document', file_data: partUrl(part) } };
+    }
+    default:
+      return { type: 'text', text: part.text ?? '' };
+  }
+}
+
+/** `input_audio.format` from a MIME type (`audio/mpeg` → `mp3`, `audio/wav` → `wav`). */
+function audioFormat(mime: string): string {
+  const sub = mime.split('/')[1]?.split(';')[0] ?? 'wav';
+  if (sub === 'mpeg' || sub === 'mp3') return 'mp3';
+  if (sub === 'x-wav' || sub === 'wave') return 'wav';
+  return sub;
+}
+
+/** MIME type of chat audio output, from the request's `providerOptions.audio.format`. */
+function audioMime(req: ChatRequest): string {
+  const format = asString(asRecord(req.providerOptions?.audio)?.format);
+  if (format === 'mp3') return 'audio/mpeg';
+  if (format === 'pcm16') return 'audio/pcm';
+  return format ? `audio/${format}` : 'audio/wav';
+}
+
+/** OpenRouter-style `images: [{ type: 'image_url', image_url: { url } }]` output. */
+function imagesFrom(value: unknown): MediaOutput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asString(asRecord(asRecord(item)?.image_url)?.url) ?? asString(asRecord(item)?.url))
+    .filter((url): url is string => !!url)
+    .map((url) => mediaFromUrl('image', url, 'image/png'));
+}
+
+function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; toolCalls: ToolCall[]; media: MediaOutput[]; inputTokens?: number; outputTokens?: number; cachedTokens?: number; finish?: string } {
   const record = asRecord(raw);
   const usage = asRecord(record?.usage);
   const choice = asRecord(Array.isArray(record?.choices) ? record.choices[0] : undefined);
@@ -260,9 +334,17 @@ function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; 
   const text = asString(message?.content) ?? asString(record?.text) ?? '';
   const reasoning = asString(message?.reasoning_content) ?? asString(message?.reasoning);
   const calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
+  const media = imagesFrom(message?.images);
+  const audio = asRecord(message?.audio);
+  const audioData = asString(audio?.data);
+  if (audioData) {
+    const transcript = asString(audio?.transcript);
+    media.push({ type: 'audio', mimeType: 'audio/wav', dataBase64: audioData, ...(transcript ? { transcript } : {}) });
+  }
   return {
     text,
     reasoning,
+    media,
     finish: asString(choice?.finish_reason),
     toolCalls: calls.map((value) => {
       const call = asRecord(value);
@@ -272,6 +354,7 @@ function parseOpenAiResponse(raw: unknown): { text: string; reasoning?: string; 
     }),
     inputTokens: asNumber(usage?.prompt_tokens),
     outputTokens: asNumber(usage?.completion_tokens),
+    cachedTokens: asNumber(asRecord(usage?.prompt_tokens_details)?.cached_tokens),
   };
 }
 
@@ -313,4 +396,28 @@ export function shouldRetryWithoutReasoningEffort(error: unknown, req: ChatReque
   if (effective === 'none') return false;
   const text = `${error.raw ?? ''} ${error.message}`.toLowerCase();
   return text.includes('reasoning_effort') && text.includes('tool');
+}
+
+/**
+ * OpenAI-family prompt-cache fields. `extended` asks for the longer lifetime:
+ * `prompt_cache_options.ttl: '12h'` on the Responses API for GPT-5.6+, and
+ * `prompt_cache_retention: '24h'` everywhere else.
+ */
+export function openAiPromptCache(req: ChatRequest, responsesApi = false): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (req.promptCache?.key) out.prompt_cache_key = req.promptCache.key;
+  if (req.promptCache?.retention === 'extended') {
+    if (responsesApi && newCacheModel(req.model)) out.prompt_cache_options = { ttl: '12h' };
+    else out.prompt_cache_retention = '24h';
+  }
+  return out;
+}
+
+/** GPT-5.6 and later use `prompt_cache_options` instead of `prompt_cache_retention`. */
+function newCacheModel(model: string): boolean {
+  const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(model);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2] ?? 0);
+  return major > 5 || (major === 5 && minor >= 6);
 }

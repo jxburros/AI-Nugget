@@ -2,10 +2,11 @@ import { adapterFor } from './adapters/index.js';
 import { applyAuth, profileFor } from './adapters/profiles.js';
 import { connectionBaseUrl } from './adapters/cloud.js';
 import { AIError, fromUnknown } from './errors.js';
-import { extractJson } from './json.js';
+import { extractJson, standardJsonSchema } from './json.js';
 import { containsReasoningBlock, createReasoningStripper, stripReasoningBlocks } from './reasoning.js';
 import { allowAllPolicy } from './policy.js';
 import { SessionRedactor } from './redact.js';
+import { parseRateLimitHeaders } from './ratelimit.js';
 import type {
   CallInfo,
   CallRecord,
@@ -16,7 +17,9 @@ import type {
   EmbedResult,
   GovernancePolicy,
   KeySource,
+  McpServer,
   ModelInfo,
+  RateLimitInfo,
   ParsedResult,
   Redactor,
   ResolvedConnection,
@@ -25,7 +28,7 @@ import type {
   TelemetrySink,
   Usage,
 } from './types.js';
-import { promptChars, sleep } from './util.js';
+import { MCP_TOKEN, promptChars, sleep } from './util.js';
 
 type QueueWaiter = {
   resolve: () => void;
@@ -127,8 +130,26 @@ export class AIHandler {
     // One idempotency key per logical call, reused across every retry attempt,
     // so a provider that supports it collapses a re-sent generation instead of
     // billing it twice (see `supportsIdempotencyKey` in the profile table).
-    const resolved = withIdempotencyKey(preflight.resolved, callId);
+    const keyed = withIdempotencyKey(preflight.resolved, callId);
+    // Capture rate-limit headers from every attempt's response at the transport
+    // seam, so no engine has to thread them through.
+    let rateLimit: RateLimitInfo | undefined;
+    const baseTransport = keyed.fetch;
+    const resolved: ResolvedConnection = {
+      ...keyed,
+      fetch: async (input, init) => {
+        const res = await (baseTransport ?? globalThis.fetch)(input, init);
+        rateLimit = parseRateLimitHeaders(res.headers) ?? rateLimit;
+        return res;
+      },
+    };
     const adapter = adapterFor(conn.provider, resolved.baseUrl, conn.protocol);
+    let adapterReq: ChatRequest = req;
+    if (req.mcpServers?.length) {
+      const mcp = await this.resolveMcpServers(conn, req.mcpServers);
+      if (!mcp.ok) return yield* this.failStream(callId, conn, req, startedAt, 1, mcp.error);
+      adapterReq = { ...req, mcpServers: mcp.servers };
+    }
 
     let acquired = false;
     let recorded = false;
@@ -145,7 +166,7 @@ export class AIHandler {
         // One stripper per attempt: a retried stream starts its tag state over.
         const stripper = stripInline ? createReasoningStripper() : null;
         try {
-          for await (const event of adapter.stream(resolved, req)) {
+          for await (const event of adapter.stream(resolved, adapterReq)) {
             if (event.type === 'start') {
               if (!emittedStart) {
                 emittedStart = true;
@@ -163,7 +184,7 @@ export class AIHandler {
               continue;
             }
             if (event.type === 'done') {
-              let result = event.result;
+              let result = rateLimit ? { ...event.result, rateLimit } : event.result;
               if (stripper) {
                 const tail = stripper.end();
                 if (tail.reasoning) yield { type: 'reasoning', text: tail.reasoning };
@@ -264,6 +285,29 @@ export class AIHandler {
   }
 
   /** Record a failed call and emit the single redacted `error` event for it. */
+  /**
+   * Governs and resolves provider-hosted MCP servers: each URL must pass
+   * `policy.checkMcpServer` (when configured) and be `https://`, and each
+   * token comes from the KeySource and is registered for redaction. Resolved
+   * tokens ride an internal field the engines read; hooks never see them.
+   */
+  private async resolveMcpServers(conn: Connection, servers: McpServer[]): Promise<{ ok: true; servers: McpServer[] } | { ok: false; error: AIError }> {
+    const out: McpServer[] = [];
+    for (const server of servers) {
+      if (!/^https:\/\//i.test(server.url)) {
+        return { ok: false, error: new AIError(`MCP server ${server.name} must use an https:// URL`, { kind: 'invalid_request', retryable: false, provider: conn.provider }) };
+      }
+      const verdict = this.policy.checkMcpServer?.(conn.provider, { name: server.name, url: server.url }) ?? { allowed: true as const };
+      if (!verdict.allowed) return { ok: false, error: new AIError(verdict.reason, { kind: 'policy_blocked', retryable: false, provider: conn.provider }) };
+      if (!server.authorization) { out.push(server); continue; }
+      const key = await this.opts.keySource.resolve(server.authorization);
+      if (!key.ok) return { ok: false, error: new AIError(`MCP server ${server.name} token unavailable: ${key.reason}`, { kind: 'key_unavailable', retryable: false, provider: conn.provider }) };
+      this.sessionRedactor.addSecret(key.apiKey);
+      out.push({ ...server, [MCP_TOKEN]: key.apiKey ?? undefined } as McpServer);
+    }
+    return { ok: true, servers: out };
+  }
+
   private async *failStream(callId: string, conn: Connection, req: ChatRequest, startedAt: number, attempts: number, error: AIError): AsyncGenerator<StreamEvent> {
     await this.recordFailure(callId, conn, req, startedAt, attempts, error);
     yield { type: 'error', error: this.redactedError(error) };
@@ -316,7 +360,10 @@ export class AIHandler {
    * caller supplies the schema.
    */
   async chatParsed<T>(conn: Connection, req: ChatRequest, schema: StandardSchemaV1<T>): Promise<ParsedResult<T>> {
-    const base: ChatRequest = { ...req, responseFormat: req.responseFormat ?? { type: 'json' } };
+    // A Standard JSON Schema validator (Zod 4.2+, Valibot, …) also yields the
+    // provider-side schema, so constrained decoding matches what we validate.
+    const derived = req.responseFormat ? undefined : standardJsonSchema(schema, 'output');
+    const base: ChatRequest = { ...req, responseFormat: req.responseFormat ?? (derived ? { type: 'json', schema: derived } : { type: 'json' }) };
     let result = await this.chat(conn, base);
     let validated = await validateWithSchema(schema, result.text);
     if (validated.ok) return { data: validated.value, result };
@@ -532,6 +579,7 @@ export class AIHandler {
       metadata: req.metadata,
       promptChars: promptChars(req.messages),
       responseChars: result.text.length,
+      ...(result.rateLimit ? { rateLimit: result.rateLimit } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
     });
   }
@@ -551,6 +599,7 @@ export class AIHandler {
       metadata: req.metadata,
       promptChars: promptChars(req.messages),
       responseChars: 0,
+      ...(error.rateLimit ? { rateLimit: error.rateLimit } : {}),
     });
   }
 
@@ -577,6 +626,7 @@ export class AIHandler {
       provider: error.provider,
       raw: error.raw === undefined ? undefined : this.redact(error.raw),
       retryAfterMs: error.retryAfterMs,
+      rateLimit: error.rateLimit,
       cause: this.redactedCause(error.cause),
     });
   }

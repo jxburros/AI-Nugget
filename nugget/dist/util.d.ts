@@ -27,5 +27,12 @@ export declare function sleep(ms: number, signal?: AbortSignal): Promise<void>;
  * `thinkingBudget`). `'none'` is 0. Deliberately conservative: they are floors
  * a model may stop under, not ceilings it fills.
  */
-export declare const REASONING_BUDGET_TOKENS: Record<'none' | 'minimal' | 'low' | 'medium' | 'high', number>;
+export declare const REASONING_BUDGET_TOKENS: Record<'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max', number>;
+/**
+ * Internal field carrying a handler-resolved MCP token to an engine. Not part
+ * of the public contract: callers supply `McpServer.authorization` (a KeyRef).
+ */
+export declare const MCP_TOKEN = "__resolvedAuthorization";
+/** The handler-resolved token for a provider-hosted MCP server, if any. */
+export declare function mcpToken(server: object): string | undefined;
 //# sourceMappingURL=util.d.ts.map

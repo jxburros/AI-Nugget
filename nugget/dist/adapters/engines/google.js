@@ -2,7 +2,7 @@ import { AIError } from '../../errors.js';
 import { estimatedUsage } from '../../tokens.js';
 import { fetchJson, postResponse, sseLines } from '../../transport.js';
 import { applyProviderOptions, REASONING_BUDGET_TOKENS, asNumber, asRecord, asString, joinUrl, textFromMessages } from '../../util.js';
-import { DEFAULT_TIMEOUT_MS, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
+import { DEFAULT_TIMEOUT_MS, mcpUnsupported, partBase64, promptCacheUnsupported, partHasBytes, partMime, randomId, safeParse, streamAnomaly, streamError, streamTimeout } from './base.js';
 export class GoogleAdapter {
     provider;
     constructor(provider) {
@@ -26,10 +26,19 @@ export class GoogleAdapter {
         let text = '';
         let inputTokens;
         let outputTokens;
+        let cachedTokens;
         let finish;
         const toolCalls = [];
+        const media = [];
+        // The model turn exactly as streamed (text merged, signatures kept), for
+        // replay: Gemini 3 rejects a function-call history without its thoughtSignature.
+        const modelParts = [];
         const timeout = streamTimeout(conn, req.signal);
         yield { type: 'start', callId: '', provider: conn.provider, model: req.model };
+        if (req.mcpServers?.length)
+            throw mcpUnsupported(conn.provider, 'generateContent');
+        if (req.promptCache)
+            yield promptCacheUnsupported(conn.provider);
         // Gemini rejects `responseMimeType: application/json` combined with function
         // declarations, so `body()` drops JSON mode when tools are present. Surface
         // that downgrade instead of silently returning unstructured text.
@@ -42,7 +51,7 @@ export class GoogleAdapter {
         }
         try {
             const streamUrl = `${conn.baseUrl}/v1beta/models/${encodeURIComponent(req.model)}:streamGenerateContent?alt=sse`;
-            const res = await postResponse(streamUrl, body(req), conn.headers, timeout.signal, conn.provider, conn.fetch);
+            const res = await postResponse(streamUrl, body(req, conn.provider), conn.headers, timeout.signal, conn.provider, conn.fetch);
             const contentType = res.headers.get('content-type') ?? '';
             const chunks = contentType.includes('text/event-stream') ? sseLines(res) : singleJsonLine(res);
             for await (const line of chunks) {
@@ -53,6 +62,15 @@ export class GoogleAdapter {
                 if (!firstCandidate(record) && promptFeedback?.blockReason)
                     finish = 'SAFETY';
                 for (const part of candidateParts(record)) {
+                    keepPart(modelParts, asRecord(part));
+                    const inline = asRecord(asRecord(part)?.inlineData);
+                    const inlineData = asString(inline?.data);
+                    if (inlineData && asRecord(part)?.thought !== true) {
+                        const mimeType = asString(inline?.mimeType) ?? 'application/octet-stream';
+                        const item = { type: mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('audio/') ? 'audio' : 'file', mimeType, dataBase64: inlineData };
+                        media.push(item);
+                        yield { type: 'context', kind: 'media', data: item };
+                    }
                     const partText = asString(asRecord(part)?.text);
                     if (partText) {
                         // Gemini marks reasoning parts with `thought: true`; route those to
@@ -82,15 +100,18 @@ export class GoogleAdapter {
                 const usage = asRecord(record?.usageMetadata);
                 inputTokens = asNumber(usage?.promptTokenCount) ?? inputTokens;
                 outputTokens = asNumber(usage?.candidatesTokenCount) ?? outputTokens;
+                cachedTokens = asNumber(usage?.cachedContentTokenCount) ?? cachedTokens;
             }
             if (!finish)
                 yield streamAnomaly('stream ended without a finishReason');
             const hasTools = toolCalls.length > 0;
             yield { type: 'done', result: {
                     text,
+                    ...(media.length ? { media } : {}),
+                    providerState: { provider: conn.provider, model: req.model, content: [{ role: 'model', parts: modelParts }] },
                     toolCalls: hasTools ? toolCalls : undefined,
                     finishReason: mapFinish(finish, hasTools),
-                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
+                    usage: inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens, ...(cachedTokens !== undefined ? { cachedInputTokens: cachedTokens } : {}), estimated: false } : estimatedUsage(textFromMessages(req.messages), text),
                     timing: { firstTokenMs, totalMs: Date.now() - started },
                     model: req.model,
                     source: { provider: conn.provider, connectionId: conn.id, baseUrl: conn.baseUrl },
@@ -161,12 +182,12 @@ export class GoogleAdapter {
 function jsonModeDowngraded(req) {
     return req.responseFormat?.type === 'json' && !!req.tools?.length;
 }
-function body(req) {
+function body(req, provider) {
     const systemText = req.messages.filter((m) => m.role === 'system').map((m) => textContent(m.content)).join('\n\n');
     const jsonMode = req.responseFormat?.type === 'json' && !req.tools?.length;
     const responseSchema = req.responseFormat?.type === 'json' ? req.responseFormat.schema : undefined;
     const payload = {
-        contents: toGoogleContents(req.messages.filter((m) => m.role !== 'system')),
+        contents: toGoogleContents(req.messages.filter((m) => m.role !== 'system'), req.model, provider),
         generationConfig: {
             temperature: req.temperature,
             topP: req.topP,
@@ -187,23 +208,29 @@ function body(req) {
         payload.toolConfig = { functionCallingConfig: config };
     }
     if (req.reasoningEffort !== undefined) {
-        // First-class reasoning effort → Gemini's thinking budget. 0 disables
-        // thinking on models that allow it; others treat it as a minimum.
-        payload.generationConfig.thinkingConfig = {
-            thinkingBudget: REASONING_BUDGET_TOKENS[req.reasoningEffort],
-        };
+        // First-class reasoning effort. Gemini 3+ takes a discrete `thinkingLevel`
+        // (sending it to 2.x, or sending both knobs, is a 400); 2.x takes a token
+        // `thinkingBudget` where 0 disables thinking on models that allow it.
+        payload.generationConfig.thinkingConfig = thinkingLevelModel(req.model)
+            ? { thinkingLevel: THINKING_LEVEL[req.reasoningEffort] }
+            : { thinkingBudget: REASONING_BUDGET_TOKENS[req.reasoningEffort] };
     }
     // providerOptions reaches Google-native fields: top-level `safetySettings`,
     // `cachedContent`, and `generationConfig` extras (`thinkingConfig`,
     // `responseModalities`, …) merged one level deep into generationConfig.
     return applyProviderOptions(payload, req.providerOptions, ['generationConfig']);
 }
-function toGoogleContents(messages) {
+function toGoogleContents(messages, model, provider) {
     const contents = [];
     for (let index = 0; index < messages.length; index += 1) {
         const message = messages[index];
+        const state = message.providerState;
+        if (message.role === 'assistant' && state?.provider === provider && state.model === model && state.protocol === undefined && state.content[0]) {
+            contents.push(state.content[0]);
+            continue;
+        }
         if (message.role !== 'tool') {
-            contents.push(toGoogleContent(message));
+            contents.push(toGoogleContent(message, model));
             continue;
         }
         const parts = [];
@@ -217,13 +244,20 @@ function toGoogleContents(messages) {
     }
     return contents;
 }
-function toGoogleContent(m) {
+function toGoogleContent(m, model) {
     // Tool-role messages are handled by toGoogleContents' batching loop and never
     // reach here, so no tool branch is needed.
     if (m.role === 'assistant' && m.toolCalls?.length) {
         const parts = [...googleParts(m.content)];
-        for (const call of m.toolCalls)
-            parts.push({ functionCall: { name: call.name, args: call.arguments ?? {} } });
+        m.toolCalls.forEach((call, i) => {
+            const part = { functionCall: { name: call.name, args: call.arguments ?? {} } };
+            // History without the original signature (rebuilt by the app, or from
+            // another provider): Gemini 3 requires one on the first call of a step,
+            // and Google documents this sentinel for exactly that case.
+            if (i === 0 && thinkingLevelModel(model))
+                part.thoughtSignature = SKIP_SIGNATURE;
+            parts.push(part);
+        });
         return { role: 'model', parts };
     }
     return {
@@ -231,14 +265,50 @@ function toGoogleContent(m) {
         parts: googleParts(m.content),
     };
 }
-/** Maps text/image content — a string or a ContentPart[] — onto Google parts. */
+/** Maps text/media content — a string or a ContentPart[] — onto Google parts. */
 function googleParts(content) {
     if (typeof content === 'string')
         return content ? [{ text: content }] : [];
-    return content.map((part) => part.type === 'image'
-        ? { inlineData: { mimeType: part.mimeType ?? 'image/png', data: part.imageBase64 ?? '' } }
-        : { text: part.text ?? '' });
+    return content.map((part) => part.type === 'text' ? { text: part.text ?? '' } : mediaPart(part));
 }
+/**
+ * Gemini accepts images, audio, video and documents as `inlineData` bytes, or
+ * by URI (`fileData`) for Files API / Cloud Storage / public URLs.
+ */
+function mediaPart(part) {
+    if (partHasBytes(part))
+        return { inlineData: { mimeType: partMime(part), data: partBase64(part) ?? '' } };
+    return { fileData: { mimeType: partMime(part), fileUri: part.url ?? '' } };
+}
+/** Collects a streamed model part for replay, merging adjacent text of the same kind. */
+function keepPart(parts, part) {
+    if (!part)
+        return;
+    const last = parts.at(-1);
+    const isText = typeof part.text === 'string' && Object.keys(part).every((key) => key === 'text' || key === 'thought' || key === 'thoughtSignature');
+    const lastIsText = last && typeof last.text === 'string' && !last.thoughtSignature && Object.keys(last).every((key) => key === 'text' || key === 'thought');
+    if (isText && lastIsText && (last.thought === true) === (part.thought === true)) {
+        last.text = `${String(last.text)}${String(part.text)}`;
+        if (part.thoughtSignature)
+            last.thoughtSignature = part.thoughtSignature;
+        return;
+    }
+    parts.push({ ...part });
+}
+const SKIP_SIGNATURE = 'skip_thought_signature_validator';
+/** Gemini 3 and later use `thinkingLevel`; 2.x models use `thinkingBudget`. */
+function thinkingLevelModel(model) {
+    const major = /^(?:models\/)?gemini-(\d+)/.exec(model)?.[1];
+    return major !== undefined && Number(major) >= 3;
+}
+/**
+ * Effort → Gemini 3 `thinkingLevel`. Gemini 3 cannot fully disable thinking, so
+ * `none` maps to its lowest level. Level support varies by model (3 Pro has only
+ * `low`/`high`); an unsupported level is the provider's honest 400.
+ */
+const THINKING_LEVEL = {
+    none: 'minimal', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high',
+};
 function textContent(content) {
     if (typeof content === 'string')
         return content;
